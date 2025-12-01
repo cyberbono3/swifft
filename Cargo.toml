@@ -11,3 +11,11 @@ keywords = ["crypto", "hash", "swifft"]
 categories = ["cryptography"]
 
 [dependencies]
+
+
+
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["user-hooks"]
+
