@@ -1,5 +1,5 @@
 use crate::{
-    math::{add_mod257, encode_state, mul_mod257, transform, Coeff, M, N},
+    math::{add_mod257, encode_state, mul_mod257, transform, M, N},
     Block, Key, State, BLOCK_LEN, STATE_LEN,
 };
 
@@ -26,7 +26,7 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
     // Here:
     //   - j = column index   (0..15)
     //   - i = output index   (0..63)
-    let mut y = [[Coeff::default(); N]; M];
+    let mut y = [[0u16; N]; M];
 
     for (j, y_col) in y.iter_mut().enumerate() {
         let bits = extract_column_bits(&msg, j);
@@ -37,7 +37,7 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
     //
     // Key layout:
     //   key.0[j * N + i]  ≙  a_{i,j}
-    let mut z = [Coeff::default(); N];
+    let mut z = [0u16; N];
 
     for (i, z_i) in z.iter_mut().enumerate() {
         let mut acc: u16 = 0;
@@ -82,14 +82,14 @@ fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
 mod tests {
     use super::compress;
     use crate::{
-        math::{self, pow_omega, Coeff, M, N, OMEGA, P},
+        math::{self, pow_omega, M, N, OMEGA, P},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
 
     mod helpers {
         use super::*;
 
-        pub fn pow_mod(mut base: u32, mut exp: u32, modulus: u32) -> Coeff {
+        pub fn pow_mod(mut base: u32, mut exp: u32, modulus: u32) -> u16 {
             base %= modulus;
             let mut result: u32 = 1;
             while exp > 0 {
@@ -99,7 +99,7 @@ mod tests {
                 base = (base * base) % modulus;
                 exp >>= 1;
             }
-            result as Coeff
+            result as u16
         }
 
         pub fn naive_transform(bits: &[u8; N]) -> [u16; N] {
