@@ -38,6 +38,7 @@ pub struct State(pub [u8; STATE_LEN]);
 pub struct Block(pub [u8; BLOCK_LEN]);
 
 pub mod core;
+pub mod field_element;
 pub(crate) mod math;
 
 /// Trait abstraction for SWIFFT-like compressors.
