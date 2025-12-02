@@ -17,7 +17,7 @@ const fn precompute_powers() -> [u16; 128] {
     let mut table = [1u16; 128];
     let mut i = 1;
     while i < 128 {
-        table[i] = mul_mod257_const_int(table[i - 1], OMEGA);
+        table[i] = fe_mul_const_int(table[i - 1], OMEGA);
         i += 1;
     }
     table
@@ -41,12 +41,12 @@ const fn precompute_twiddle() -> [[u16; N]; N] {
 }
 
 #[allow(clippy::cast_possible_truncation)] // bounded by P = 257
-const fn mul_mod257_const_int(a: u16, b: u16) -> u16 {
+const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
     ((a as u32 * b as u32) % (P as u32)) as u16
 }
 
 #[inline]
-pub(crate) fn add_mod257(a: u16, b: u16) -> u16 {
+pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
     if cfg!(feature = "ark-ntt") {
         #[cfg(feature = "ark-ntt")]
         {
@@ -61,7 +61,7 @@ pub(crate) fn add_mod257(a: u16, b: u16) -> u16 {
 }
 
 #[inline]
-pub(crate) fn mul_mod257(a: u16, b: u16) -> u16 {
+pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
     if cfg!(feature = "ark-ntt") {
         #[cfg(feature = "ark-ntt")]
         {
@@ -96,9 +96,9 @@ const fn pow_omega_const(exp: u32) -> u16 {
 
     while e > 0 {
         if (e & 1) != 0 {
-            result = mul_mod257_const_int(result, base);
+            result = fe_mul_const_int(result, base);
         }
-        base = mul_mod257_const_int(base, base);
+        base = fe_mul_const_int(base, base);
         e >>= 1;
     }
 
@@ -119,7 +119,7 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
         for (bit, &omega_pow) in bits.iter().zip(twiddle_row.iter()) {
             debug_assert!(*bit <= 1, "transform bits must be 0/1");
             if *bit == 1 {
-                acc = add_mod257(acc, omega_pow);
+                acc = fe_add(acc, omega_pow);
             }
         }
 

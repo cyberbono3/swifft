@@ -1,5 +1,5 @@
 use crate::{
-    math::{add_mod257, encode_state, mul_mod257, transform, M, N},
+    math::{encode_state, fe_add, fe_mul, transform, M, N},
     Block, Key, State, BLOCK_LEN, STATE_LEN,
 };
 
@@ -44,8 +44,8 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
 
         for (j, y_col) in y.iter().enumerate() {
             let a_ij = u16::from(key.0[j * N + i]);
-            let term = mul_mod257(a_ij, y_col[i]);
-            acc = add_mod257(acc, term);
+            let term = fe_mul(a_ij, y_col[i]);
+            acc = fe_add(acc, term);
         }
 
         *z_i = acc; // In [0, 256].
@@ -161,17 +161,17 @@ mod tests {
     }
 
     #[test]
-    fn add_mod257_wraps() {
-        assert_eq!(math::add_mod257(200, 100), 43);
-        assert_eq!(math::add_mod257(256, 1), 0);
-        assert_eq!(math::add_mod257(256, 256), 255);
+    fn fe_add_wraps() {
+        assert_eq!(math::fe_add(200, 100), 43);
+        assert_eq!(math::fe_add(256, 1), 0);
+        assert_eq!(math::fe_add(256, 256), 255);
     }
 
     #[test]
-    fn mul_mod257_basic() {
-        assert_eq!(math::mul_mod257(30, 30), 129);
-        assert_eq!(math::mul_mod257(256, 2), 255);
-        assert_eq!(math::mul_mod257(0, 123), 0);
+    fn fe_mul_basic() {
+        assert_eq!(math::fe_mul(30, 30), 129);
+        assert_eq!(math::fe_mul(256, 2), 255);
+        assert_eq!(math::fe_mul(0, 123), 0);
     }
 
     #[test]
