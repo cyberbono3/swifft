@@ -45,36 +45,33 @@ const fn mul_mod257_const_int(a: u16, b: u16) -> u16 {
     ((a as u32 * b as u32) % (P as u32)) as u16
 }
 
-#[cfg(feature = "ark-ntt")]
-#[inline]
-fn mul_mod257_const(a: u16, b: u16) -> u16 {
-    let prod = coeff_to_field(a) * coeff_to_field(b);
-    field_to_coeff(&prod)
-}
-
-#[cfg(feature = "ark-ntt")]
 #[inline]
 pub(crate) fn add_mod257(a: u16, b: u16) -> u16 {
-    let sum = coeff_to_field(a) + coeff_to_field(b);
-    field_to_coeff(&sum)
-}
+    if cfg!(feature = "ark-ntt") {
+        #[cfg(feature = "ark-ntt")]
+        {
+            let sum = coeff_to_field(a) + coeff_to_field(b);
+            return field_to_coeff(&sum);
+        }
+        #[cfg(not(feature = "ark-ntt"))]
+        unreachable!();
+    }
 
-#[cfg(feature = "ark-ntt")]
-#[inline]
-pub(crate) fn mul_mod257(a: u16, b: u16) -> u16 {
-    let prod = coeff_to_field(a) * coeff_to_field(b);
-    field_to_coeff(&prod)
-}
-
-#[cfg(not(feature = "ark-ntt"))]
-#[inline]
-pub(crate) fn add_mod257(a: u16, b: u16) -> u16 {
     (FieldElement::from(a) + FieldElement::from(b)).value()
 }
 
-#[cfg(not(feature = "ark-ntt"))]
 #[inline]
 pub(crate) fn mul_mod257(a: u16, b: u16) -> u16 {
+    if cfg!(feature = "ark-ntt") {
+        #[cfg(feature = "ark-ntt")]
+        {
+            let prod = coeff_to_field(a) * coeff_to_field(b);
+            return field_to_coeff(&prod);
+        }
+        #[cfg(not(feature = "ark-ntt"))]
+        unreachable!();
+    }
+
     (FieldElement::from(a) * FieldElement::from(b)).value()
 }
 
