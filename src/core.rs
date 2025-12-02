@@ -1,5 +1,7 @@
 use crate::{
-    math::{encode_state, fe_add, fe_mul, transform, M, N},
+    fe,
+    field_element::FieldElement,
+    math::{encode_state, transform, M, N},
     Block, Key, State, BLOCK_LEN, STATE_LEN,
 };
 
@@ -26,33 +28,34 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
     // Here:
     //   - j = column index   (0..15)
     //   - i = output index   (0..63)
-    let mut y = [[0u16; N]; M];
+    let mut y = [[FieldElement::ZERO; N]; M];
 
     for (j, y_col) in y.iter_mut().enumerate() {
         let bits = extract_column_bits(&msg, j);
-        *y_col = transform(&bits);
+        *y_col = transform(&bits).map(FieldElement::from);
     }
 
     // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
     //
     // Key layout:
     //   key.0[j * N + i]  ≙  a_{i,j}
-    let mut z = [0u16; N];
+    let mut z = [FieldElement::ZERO; N];
 
     for (i, z_i) in z.iter_mut().enumerate() {
-        let mut acc: u16 = 0;
+        let mut acc = FieldElement::ZERO;
 
         for (j, y_col) in y.iter().enumerate() {
-            let a_ij = u16::from(key.0[j * N + i]);
-            let term = fe_mul(a_ij, y_col[i]);
-            acc = fe_add(acc, term);
+            let a_ij = fe!(u16::from(key.0[j * N + i]));
+            let term = a_ij * y_col[i];
+            acc += term;
         }
 
         *z_i = acc; // In [0, 256].
     }
 
     // 5. Encode back into the 72-byte state buffer.
-    *state = encode_state(&z);
+    let z_u16: [u16; N] = z.map(FieldElement::value);
+    *state = encode_state(&z_u16);
 }
 
 fn assemble_message(state: &State, block: &Block) -> Message {
@@ -82,7 +85,7 @@ fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
 mod tests {
     use super::compress;
     use crate::{
-        math::{self, pow_omega, M, N, OMEGA, P},
+        math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA, P},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
 
@@ -162,16 +165,16 @@ mod tests {
 
     #[test]
     fn fe_add_wraps() {
-        assert_eq!(math::fe_add(200, 100), 43);
-        assert_eq!(math::fe_add(256, 1), 0);
-        assert_eq!(math::fe_add(256, 256), 255);
+        assert_eq!(fe_add(200, 100), 43);
+        assert_eq!(fe_add(256, 1), 0);
+        assert_eq!(fe_add(256, 256), 255);
     }
 
     #[test]
     fn fe_mul_basic() {
-        assert_eq!(math::fe_mul(30, 30), 129);
-        assert_eq!(math::fe_mul(256, 2), 255);
-        assert_eq!(math::fe_mul(0, 123), 0);
+        assert_eq!(fe_mul(30, 30), 129);
+        assert_eq!(fe_mul(256, 2), 255);
+        assert_eq!(fe_mul(0, 123), 0);
     }
 
     #[test]

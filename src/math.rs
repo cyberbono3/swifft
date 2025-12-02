@@ -1,4 +1,4 @@
-use crate::{field_element::FieldElement, State, STATE_LEN};
+use crate::{fe, State, STATE_LEN};
 use core::convert::TryFrom;
 
 pub use crate::field_element::P;
@@ -57,10 +57,11 @@ pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
         unreachable!();
     }
 
-    (FieldElement::from(a) + FieldElement::from(b)).value()
+    (fe!(a) + fe!(b)).value()
 }
 
 #[inline]
+#[allow(dead_code)]
 pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
     if cfg!(feature = "ark-ntt") {
         #[cfg(feature = "ark-ntt")]
@@ -72,7 +73,7 @@ pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
         unreachable!();
     }
 
-    (FieldElement::from(a) * FieldElement::from(b)).value()
+    (fe!(a) * fe!(b)).value()
 }
 
 /// Compute OMEGA^exp mod 257 using the precomputed table.
