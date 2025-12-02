@@ -12,6 +12,26 @@ pub const P: u16 = 257;
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct FieldElement(pub u16);
 
+#[macro_export]
+macro_rules! fe {
+    ($value:expr) => {
+        $crate::field_element::FieldElement::from($value)
+    };
+}
+
+/// Create a `FieldElement` from a numeric literal or expression.
+///
+/// ```
+/// use swifft::fe;
+///
+/// let a = fe!(42);
+/// let b = fe!(1 + 1);
+/// assert_eq!(a.value(), 42);
+/// assert_eq!(b.value(), 2);
+/// ```
+#[doc(inline)]
+pub use crate::fe;
+
 impl FieldElement {
     pub const BYTES: usize = 2;
     pub const MAX: u16 = P - 1;
