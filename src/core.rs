@@ -85,7 +85,8 @@ fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
 mod tests {
     use super::compress;
     use crate::{
-        math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA, P},
+        field_element::FieldElement,
+        math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
 
@@ -117,8 +118,10 @@ mod tests {
                         continue;
                     }
                     let exponent = factor * (k as u32);
-                    let w = pow_mod(OMEGA as u32, exponent, P as u32) as u32;
-                    acc = (acc + w) % (P as u32);
+                    let w =
+                        pow_mod(OMEGA as u32, exponent, FieldElement::P as u32)
+                            as u32;
+                    acc = (acc + w) % (FieldElement::P as u32);
                 }
 
                 *out_i = acc as u16;
@@ -152,8 +155,9 @@ mod tests {
 
                 for (j, y_col) in y.iter().enumerate() {
                     let a_ij = key.0[j * N + i] as u32;
-                    let term = (a_ij * y_col[i] as u32) % (P as u32);
-                    acc = (acc + term) % (P as u32);
+                    let term =
+                        (a_ij * y_col[i] as u32) % (FieldElement::P as u32);
+                    acc = (acc + term) % (FieldElement::P as u32);
                 }
 
                 *z_i = acc as u16;

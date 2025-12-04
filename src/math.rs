@@ -1,7 +1,6 @@
-use crate::{fe, State, STATE_LEN};
+use crate::{fe, field_element::FieldElement, State, STATE_LEN};
 use core::convert::TryFrom;
 
-pub use crate::field_element::P;
 /// Ring dimension n.
 pub(crate) const N: usize = 64;
 /// Number of columns m.
@@ -42,7 +41,7 @@ const fn precompute_twiddle() -> [[u16; N]; N] {
 
 #[allow(clippy::cast_possible_truncation)] // bounded by P = 257
 const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
-    ((a as u32 * b as u32) % (P as u32)) as u16
+    FieldElement::montyred((a as u32) * (b as u32))
 }
 
 #[inline]
@@ -200,7 +199,7 @@ mod ark_fft {
     pub fn field_to_coeff(f: &F257) -> u16 {
         // into_bigint is canonical; still mask to be safe.
         let limbs = f.into_bigint().0;
-        (limbs[0] % (super::P as u64)) as u16
+        (limbs[0] % (super::FieldElement::P as u64)) as u16
     }
 }
 
