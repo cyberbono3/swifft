@@ -28,30 +28,23 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
     // Here:
     //   - j = column index   (0..15)
     //   - i = output index   (0..63)
-    let mut y = [[FieldElement::ZERO; N]; M];
-
-    for (j, y_col) in y.iter_mut().enumerate() {
+    let y: [[FieldElement; N]; M] = core::array::from_fn(|j| {
         let bits = extract_column_bits(&msg, j);
-        *y_col = transform(&bits).map(FieldElement::from);
-    }
+        transform(&bits).map(FieldElement::from)
+    });
 
     // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
     //
     // Key layout:
     //   key.0[j * N + i]  ≙  a_{i,j}
-    let mut z = [FieldElement::ZERO; N];
-
-    for (i, z_i) in z.iter_mut().enumerate() {
-        let mut acc = FieldElement::ZERO;
-
-        for (j, y_col) in y.iter().enumerate() {
-            let a_ij = fe!(u16::from(key.0[j * N + i]));
-            let term = a_ij * y_col[i];
-            acc += term;
-        }
-
-        *z_i = acc; // In [0, 256].
-    }
+    let z: [FieldElement; N] = core::array::from_fn(|i| {
+        y.iter()
+            .enumerate()
+            .fold(FieldElement::ZERO, |acc, (j, y_col)| {
+                let a_ij = fe!(u16::from(key.0[j * N + i]));
+                acc + a_ij * y_col[i]
+            })
+    });
 
     // 5. Encode back into the 72-byte state buffer.
     let z_u16: [u16; N] = z.map(FieldElement::value);
