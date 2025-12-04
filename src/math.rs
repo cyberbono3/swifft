@@ -208,3 +208,100 @@ pub use ark_fft::{
     coeff_to_field, field_to_coeff, intt_in_place, ntt_in_place, F257Config,
     F257, TWO_ADICITY,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pow_mod(base: u32, mut exp: u32, modulus: u32) -> u16 {
+        let mut result: u32 = 1;
+        let mut b = base % modulus;
+        while exp > 0 {
+            if exp & 1 == 1 {
+                result = (result * b) % modulus;
+            }
+            b = (b * b) % modulus;
+            exp >>= 1;
+        }
+        result as u16
+    }
+
+    #[test]
+    fn fe_mul_const_int_matches_field_mul() {
+        let cases = [(0u16, 0u16), (1, 1), (2, 256), (123, 45), (OMEGA, OMEGA)];
+
+        for (a, b) in cases {
+            let expected = (fe!(a) * fe!(b)).value();
+            assert_eq!(fe_mul_const_int(a, b), expected);
+        }
+    }
+
+    #[test]
+    fn pow_omega_matches_naive_pow() {
+        for exp in 0..256u32 {
+            let expected = pow_mod(OMEGA as u32, exp, FieldElement::P as u32);
+            assert_eq!(pow_omega(exp), expected, "exp {}", exp);
+        }
+    }
+
+    #[test]
+    fn pow_omega_const_agrees_with_runtime() {
+        for exp in 0..256u32 {
+            assert_eq!(pow_omega_const(exp), pow_omega(exp), "exp {}", exp);
+        }
+    }
+
+    fn naive_transform(bits: &[u8; N]) -> [u16; N] {
+        let mut out = [0u16; N];
+
+        for (i, out_i) in out.iter_mut().enumerate() {
+            let mut acc = 0u32;
+            let factor = 2 * (i as u32) + 1;
+
+            for (k, &bit) in bits.iter().enumerate() {
+                if bit & 1 == 0 {
+                    continue;
+                }
+                let exponent = factor * (k as u32);
+                let w = pow_mod(OMEGA as u32, exponent, FieldElement::P as u32)
+                    as u32;
+                acc = (acc + w) % (FieldElement::P as u32);
+            }
+
+            *out_i = acc as u16;
+        }
+
+        out
+    }
+
+    #[test]
+    fn transform_matches_naive() {
+        let mut bits = [0u8; N];
+        for idx in [0usize, 1, 5, 13, 21, 63] {
+            bits[idx] = 1;
+        }
+
+        let fast = transform(&bits);
+        let expected = naive_transform(&bits);
+        assert_eq!(fast, expected);
+    }
+
+    #[test]
+    fn encode_state_packs_high_bits() {
+        let mut coeffs = [0u16; N];
+        coeffs[0] = 256;
+        coeffs[7] = 256;
+        coeffs[8] = 256;
+        coeffs[10] = 255;
+        coeffs[63] = 256;
+
+        let encoded = encode_state(&coeffs);
+
+        assert_eq!(encoded.0[0], 0);
+        assert_eq!(encoded.0[10], 255);
+        assert_eq!(encoded.0[64], 0b1000_0001);
+        assert_eq!(encoded.0[65], 0b0000_0001);
+        assert_eq!(encoded.0[71], 0b1000_0000);
+        assert_eq!(&encoded.0[66..71], &[0, 0, 0, 0, 0]);
+    }
+}
