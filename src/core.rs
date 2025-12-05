@@ -78,7 +78,7 @@ impl State {
         //   - j = column index   (0..15)
         //   - i = output index   (0..63)
         let y: [[FieldElement; N]; M] = core::array::from_fn(|j| {
-            let bits = extract_column_bits(&msg, j);
+            let bits = msg.extract_column_bits(j);
             transform(&bits).map(FieldElement::from)
         });
 
@@ -104,7 +104,7 @@ impl State {
         let mut msg = [0u8; MSG_LEN];
         msg[..STATE_LEN].copy_from_slice(&self.0);
         msg[STATE_LEN..].copy_from_slice(&block.0);
-        msg
+        Message(msg)
     }
 }
 
@@ -178,7 +178,39 @@ impl Compressor for Key {
 }
 
 const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
-type Message = [u8; MSG_LEN];
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Message([u8; MSG_LEN]);
+
+impl Message {
+    #[must_use]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub const fn as_bytes(&self) -> &[u8; MSG_LEN] {
+        &self.0
+    }
+
+    #[allow(dead_code)]
+    #[must_use]
+    pub fn into_inner(self) -> [u8; MSG_LEN] {
+        self.0
+    }
+
+    pub(crate) fn extract_column_bits(&self, column: usize) -> [u8; N] {
+        debug_assert!(column < M, "column index out of range");
+
+        let mut bits = [0u8; N];
+        for (k, bit) in bits.iter_mut().enumerate() {
+            let bit_index = column * N + k; // 0..1023
+            let byte_index = bit_index / 8;
+            let bit_in_byte = bit_index % 8;
+
+            // Little-endian within each byte: bit 0 is least-significant.
+            let b = (self.0[byte_index] >> bit_in_byte) & 1;
+            *bit = b;
+        }
+        bits
+    }
+}
 
 /// Core SWIFFT compression function.
 ///
@@ -193,22 +225,6 @@ type Message = [u8; MSG_LEN];
 /// 5. Encode the 64 coefficients `z_i` ∈ {0,…,256} into 72 bytes.
 pub fn compress(key: &Key, state: &mut State, block: &Block) {
     state.compress(key, block);
-}
-
-fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
-    debug_assert!(column < M, "column index out of range");
-
-    let mut bits = [0u8; N];
-    for (k, bit) in bits.iter_mut().enumerate() {
-        let bit_index = column * N + k; // 0..1023
-        let byte_index = bit_index / 8;
-        let bit_in_byte = bit_index % 8;
-
-        // Little-endian within each byte: bit 0 is least-significant.
-        let b = (msg[byte_index] >> bit_in_byte) & 1;
-        *bit = b;
-    }
-    bits
 }
 
 #[cfg(test)]
@@ -275,7 +291,7 @@ mod tests {
             let mut y = [[0u16; N]; M];
 
             for (j, y_col) in y.iter_mut().enumerate() {
-                let bits = super::super::extract_column_bits(&msg, j);
+                let bits = msg.extract_column_bits(j);
                 *y_col = naive_transform(&bits);
             }
 
@@ -427,8 +443,37 @@ mod tests {
         let block = Block::from(block_bytes);
 
         let msg = state.assemble_message(&block);
-        assert_eq!(&msg[..STATE_LEN], state_bytes.as_slice());
-        assert_eq!(&msg[STATE_LEN..], block_bytes.as_slice());
+        assert_eq!(&msg.as_bytes()[..STATE_LEN], state_bytes.as_slice());
+        assert_eq!(&msg.as_bytes()[STATE_LEN..], block_bytes.as_slice());
+    }
+
+    #[test]
+    fn extract_column_bits_reads_from_state_and_block_regions() {
+        let mut state_bytes = [0u8; STATE_LEN];
+        let mut block_bytes = [0u8; BLOCK_LEN];
+
+        // Column 0: first 8 bytes (state region).
+        state_bytes[0] = 0b1010_0001; // bits 0,5,7 set.
+                                      // Column 9 starts at byte index 72 (state_len), in block region.
+        block_bytes[0] = 0b0101_0010; // bits 1,4,6 set for column 9.
+
+        let state = State::from(state_bytes);
+        let block = Block::from(block_bytes);
+        let msg = state.assemble_message(&block);
+
+        let col0 = msg.extract_column_bits(0);
+        assert_eq!(col0[0], 1);
+        assert_eq!(col0[1], 0);
+        assert_eq!(col0[5], 1);
+        assert_eq!(col0[7], 1);
+        assert_eq!(col0[6], 0);
+
+        let col9 = msg.extract_column_bits(9);
+        assert_eq!(col9[1], 1);
+        assert_eq!(col9[4], 1);
+        assert_eq!(col9[6], 1);
+        assert_eq!(col9[0], 0);
+        assert_eq!(col9[2], 0);
     }
 
     #[test]
