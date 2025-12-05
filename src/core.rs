@@ -67,6 +67,39 @@ impl State {
         self.0
     }
 
+    /// Core SWIFFT compression in-place on this state.
+    pub fn compress(&mut self, key: &Key, block: &Block) {
+        // 1. Build the 128-byte message buffer.
+        let msg = self.assemble_message(block);
+
+        // 2–3. Compute y[j][i] = F(x_j)_i.
+        //
+        // Here:
+        //   - j = column index   (0..15)
+        //   - i = output index   (0..63)
+        let y: [[FieldElement; N]; M] = core::array::from_fn(|j| {
+            let bits = extract_column_bits(&msg, j);
+            transform(&bits).map(FieldElement::from)
+        });
+
+        // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
+        //
+        // Key layout:
+        //   key.0[j * N + i]  ≙  a_{i,j}
+        let z: [FieldElement; N] = core::array::from_fn(|i| {
+            y.iter()
+                .enumerate()
+                .fold(FieldElement::ZERO, |acc, (j, y_col)| {
+                    let a_ij = fe!(u16::from(key.0[j * N + i]));
+                    acc + a_ij * y_col[i]
+                })
+        });
+
+        // 5. Encode back into the 72-byte state buffer.
+        let z_u16: [u16; N] = z.map(FieldElement::value);
+        *self = encode_state(&z_u16);
+    }
+
     pub(crate) fn assemble_message(&self, block: &Block) -> Message {
         let mut msg = [0u8; MSG_LEN];
         msg[..STATE_LEN].copy_from_slice(&self.0);
@@ -159,35 +192,7 @@ type Message = [u8; MSG_LEN];
 ///    where a_{i,j} comes from the key.
 /// 5. Encode the 64 coefficients `z_i` ∈ {0,…,256} into 72 bytes.
 pub fn compress(key: &Key, state: &mut State, block: &Block) {
-    // 1. Build the 128-byte message buffer.
-    let msg = state.assemble_message(block);
-
-    // 2–3. Compute y[j][i] = F(x_j)_i.
-    //
-    // Here:
-    //   - j = column index   (0..15)
-    //   - i = output index   (0..63)
-    let y: [[FieldElement; N]; M] = core::array::from_fn(|j| {
-        let bits = extract_column_bits(&msg, j);
-        transform(&bits).map(FieldElement::from)
-    });
-
-    // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
-    //
-    // Key layout:
-    //   key.0[j * N + i]  ≙  a_{i,j}
-    let z: [FieldElement; N] = core::array::from_fn(|i| {
-        y.iter()
-            .enumerate()
-            .fold(FieldElement::ZERO, |acc, (j, y_col)| {
-                let a_ij = fe!(u16::from(key.0[j * N + i]));
-                acc + a_ij * y_col[i]
-            })
-    });
-
-    // 5. Encode back into the 72-byte state buffer.
-    let z_u16: [u16; N] = z.map(FieldElement::value);
-    *state = encode_state(&z_u16);
+    state.compress(key, block);
 }
 
 fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
@@ -379,6 +384,31 @@ mod tests {
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
+    }
+
+    #[test]
+    fn state_method_matches_free_compress() {
+        let mut key = Key([0u8; KEY_LEN]);
+        for (i, byte) in key.0.iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(11).wrapping_add(7);
+        }
+
+        let mut state_a = State::default();
+        for (i, byte) in state_a.0.iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(5).wrapping_add(9);
+        }
+
+        let mut state_b = state_a.clone();
+
+        let mut block = Block::default();
+        for (i, byte) in block.0.iter_mut().enumerate() {
+            *byte = (i as u8).wrapping_mul(17).wrapping_add(3);
+        }
+
+        state_a.compress(&key, &block);
+        compress(&key, &mut state_b, &block);
+
+        assert_eq!(state_a, state_b);
     }
 
     #[test]
