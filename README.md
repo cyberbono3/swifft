@@ -1,7 +1,7 @@
 PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP)
 
 - Clean-room Rust port of the n=64, m=16, p=257 parameters.
-- `no_std`-ready; the default `std` feature can be disabled.
+- Requires `std` for now (no `no_std` support).
 - Optional feature flags reserved for future optimizations: `parallel`, `simd`.
 
 ## Usage

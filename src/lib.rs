@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), deny(clippy::all, clippy::pedantic))]
-#![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(
     not(test),
     allow(
@@ -12,8 +11,7 @@
 //! SWIFFT compression function
 //!
 //! This is a clean-room implementation based on the public description
-//! of SWIFFT (n = 64, m = 16, p = 257). The crate is `no_std`-ready; enable
-//! the `std` feature (default) if you want standard library support.
+//! of SWIFFT (n = 64, m = 16, p = 257).
 
 pub const KEY_LEN: usize = 1024; // 16 × 64 coefficients
 pub const STATE_LEN: usize = 72; // 64 low bytes + 8 high-bit bytes

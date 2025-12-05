@@ -8,19 +8,12 @@ pub(crate) const M: usize = 16;
 /// A 128th root of unity modulo 257 (order exactly 128).
 pub(crate) const OMEGA: u16 = 42;
 
-const POW_TABLE: [u16; 128] = precompute_powers();
-const TWIDDLE: [[u16; N]; N] = precompute_twiddle();
-
-#[allow(clippy::cast_possible_truncation)] // indices are bounded by construction
-const fn precompute_powers() -> [u16; 128] {
-    let mut table = [1u16; 128];
-    let mut i = 1;
-    while i < 128 {
-        table[i] = fe_mul_const_int(table[i - 1], OMEGA);
-        i += 1;
-    }
-    table
+#[allow(clippy::cast_possible_truncation)] // bounded by P = 257
+const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
+    FieldElement::montyred((a as u32) * (b as u32))
 }
+
+const TWIDDLE: [[u16; N]; N] = precompute_twiddle();
 
 #[allow(clippy::cast_possible_truncation)] // i,k are always < 64
 const fn precompute_twiddle() -> [[u16; N]; N] {
@@ -39,39 +32,19 @@ const fn precompute_twiddle() -> [[u16; N]; N] {
     table
 }
 
-#[allow(clippy::cast_possible_truncation)] // bounded by P = 257
-const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
-    FieldElement::montyred((a as u32) * (b as u32))
-}
+// #[allow(clippy::cast_possible_truncation)] // bounded by P = 257
+// const fn fe_mul_const_int(a: u16, b: u16) -> FieldElement {
+//     FieldElement::from(a) * FieldElement::from(b)
+// }
 
 #[inline]
 pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
-    if cfg!(feature = "ark-ntt") {
-        #[cfg(feature = "ark-ntt")]
-        {
-            let sum = coeff_to_field(a) + coeff_to_field(b);
-            return field_to_coeff(&sum);
-        }
-        #[cfg(not(feature = "ark-ntt"))]
-        unreachable!();
-    }
-
     (fe!(a) + fe!(b)).value()
 }
 
 #[inline]
 #[allow(dead_code)]
 pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
-    if cfg!(feature = "ark-ntt") {
-        #[cfg(feature = "ark-ntt")]
-        {
-            let prod = coeff_to_field(a) * coeff_to_field(b);
-            return field_to_coeff(&prod);
-        }
-        #[cfg(not(feature = "ark-ntt"))]
-        unreachable!();
-    }
-
     (fe!(a) * fe!(b)).value()
 }
 
@@ -79,7 +52,7 @@ pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
 #[inline]
 #[allow(dead_code)] // used in tests and for debugging
 pub(crate) fn pow_omega(exp: u32) -> u16 {
-    POW_TABLE[exp_index(exp)]
+    pow_table()[exp_index(exp)].value()
 }
 
 #[inline]
@@ -103,6 +76,23 @@ const fn pow_omega_const(exp: u32) -> u16 {
     }
 
     result
+}
+
+/// Lazy runtime table for ω^k.
+fn pow_table() -> &'static [FieldElement; 128] {
+    use std::sync::OnceLock;
+
+    static TABLE: OnceLock<[FieldElement; 128]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [FieldElement::ONE; 128];
+        let omega = FieldElement::from(OMEGA);
+        let mut i = 1;
+        while i < 128 {
+            table[i] = table[i - 1] * omega;
+            i += 1;
+        }
+        table
+    })
 }
 
 /// Compute F(x) for a 64-bit vector x ∈ {0,1}^64 using a precomputed twiddle matrix.
@@ -154,60 +144,6 @@ pub(crate) fn encode_state(coeffs: &[u16; N]) -> State {
 
     State(bytes)
 }
-
-// Optional arkworks-backed FFT/NTT helpers for benchmarking and experimentation.
-// The SWIFFT core does not rely on these, but they provide a convenient,
-// well-tested NTT for F_257 when the `ark-ntt` feature is enabled.
-#[cfg(feature = "ark-ntt")]
-mod ark_fft {
-    use ark_ff::{fields::Fp64, MontBackend, MontConfig, PrimeField};
-    use ark_poly::{EvaluationDomain, GeneralEvaluationDomain};
-
-    #[derive(MontConfig)]
-    #[modulus = "257"]
-    #[generator = "3"] // generator of order 256 in F_257
-    pub struct F257Config;
-
-    pub type F257 = Fp64<MontBackend<F257Config, 1>>;
-
-    /// Two-adicity for F_257 (257 - 1 = 2^8).
-    pub const TWO_ADICITY: u64 = 8;
-
-    /// In-place forward NTT using arkworks domains (requires power-of-two len ≤ 256).
-    pub fn ntt_in_place(values: &mut [F257]) {
-        let domain = GeneralEvaluationDomain::<F257>::new(values.len())
-            .expect("NTT length must be compatible with two-adicity 8");
-        domain.fft(values);
-    }
-
-    /// In-place inverse NTT using arkworks domains (requires power-of-two len ≤ 256).
-    pub fn intt_in_place(values: &mut [F257]) {
-        let domain = GeneralEvaluationDomain::<F257>::new(values.len())
-            .expect("NTT length must be compatible with two-adicity 8");
-        domain.ifft(values);
-    }
-
-    /// Convert a coefficient (0..=256) into the F_257 element type.
-    #[inline]
-    pub fn coeff_to_field(c: u16) -> F257 {
-        F257::from(c as u64)
-    }
-
-    /// Convert an F_257 element back into a coefficient (0..=256).
-    #[inline]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    pub fn field_to_coeff(f: &F257) -> u16 {
-        // into_bigint is canonical; still mask to be safe.
-        let limbs = f.into_bigint().0;
-        (limbs[0] % (super::FieldElement::P as u64)) as u16
-    }
-}
-
-#[cfg(feature = "ark-ntt")]
-pub use ark_fft::{
-    coeff_to_field, field_to_coeff, intt_in_place, ntt_in_place, F257Config,
-    F257, TWO_ADICITY,
-};
 
 #[cfg(test)]
 mod tests {
