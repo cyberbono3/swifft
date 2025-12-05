@@ -9,11 +9,6 @@ pub(crate) const M: usize = 16;
 /// A 128th root of unity modulo 257 (order exactly 128).
 pub(crate) const OMEGA: u16 = 42;
 
-#[inline]
-pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
-    (fe!(a) + fe!(b)).value()
-}
-
 /// Lazy runtime table for ω^k.
 fn pow_table() -> &'static [FieldElement; 128] {
     use std::sync::OnceLock;
@@ -86,17 +81,17 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
     let mut out = [0u16; N];
 
     for (i, out_i) in out.iter_mut().enumerate() {
-        let mut acc: u16 = 0;
+        let mut acc = FieldElement::ZERO;
         let twiddle_row = &twiddle()[i];
 
         for (bit, &omega_pow) in bits.iter().zip(twiddle_row.iter()) {
             debug_assert!(*bit <= 1, "transform bits must be 0/1");
             if *bit == 1 {
-                acc = fe_add(acc, omega_pow);
+                acc += fe!(omega_pow);
             }
         }
 
-        *out_i = acc;
+        *out_i = acc.value();
     }
 
     out

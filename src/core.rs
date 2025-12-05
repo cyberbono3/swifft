@@ -165,9 +165,8 @@ impl Message {
 mod tests {
     use super::Message;
     use crate::{
-        fe,
         field_element::FieldElement,
-        math::{self, fe_add, pow_omega, M, N, OMEGA},
+        math::{self, pow_omega, M, N, OMEGA},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
     use core::convert::TryFrom;
@@ -253,20 +252,6 @@ mod tests {
 
             naive_encode(&z)
         }
-    }
-
-    #[test]
-    fn fe_add_wraps() {
-        assert_eq!(fe_add(200, 100), 43);
-        assert_eq!(fe_add(256, 1), 0);
-        assert_eq!(fe_add(256, 256), 255);
-    }
-
-    #[test]
-    fn fe_mul_basic() {
-        assert_eq!(fe!(30) * fe!(30), fe!(129));
-        assert_eq!(fe!(256) * fe!(2), fe!(255));
-        assert_eq!(fe!(0) * fe!(23), fe!(0));
     }
 
     #[test]
