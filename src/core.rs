@@ -66,6 +66,13 @@ impl State {
     pub const fn into_inner(self) -> [u8; STATE_LEN] {
         self.0
     }
+
+    pub(crate) fn assemble_message(&self, block: &Block) -> Message {
+        let mut msg = [0u8; MSG_LEN];
+        msg[..STATE_LEN].copy_from_slice(&self.0);
+        msg[STATE_LEN..].copy_from_slice(&block.0);
+        msg
+    }
 }
 
 impl Default for State {
@@ -153,7 +160,7 @@ type Message = [u8; MSG_LEN];
 /// 5. Encode the 64 coefficients `z_i` ∈ {0,…,256} into 72 bytes.
 pub fn compress(key: &Key, state: &mut State, block: &Block) {
     // 1. Build the 128-byte message buffer.
-    let msg = assemble_message(state, block);
+    let msg = state.assemble_message(block);
 
     // 2–3. Compute y[j][i] = F(x_j)_i.
     //
@@ -181,13 +188,6 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
     // 5. Encode back into the 72-byte state buffer.
     let z_u16: [u16; N] = z.map(FieldElement::value);
     *state = encode_state(&z_u16);
-}
-
-fn assemble_message(state: &State, block: &Block) -> Message {
-    let mut msg = [0u8; MSG_LEN];
-    msg[..STATE_LEN].copy_from_slice(&state.0);
-    msg[STATE_LEN..].copy_from_slice(&block.0);
-    msg
 }
 
 fn extract_column_bits(msg: &Message, column: usize) -> [u8; N] {
@@ -265,7 +265,7 @@ mod tests {
             state: &State,
             block: &Block,
         ) -> State {
-            let msg = super::super::assemble_message(state, block);
+            let msg = state.assemble_message(block);
 
             let mut y = [[0u16; N]; M];
 
@@ -379,6 +379,26 @@ mod tests {
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
+    }
+
+    #[test]
+    fn assemble_message_concatenates_state_and_block() {
+        let mut state_bytes = [0u8; STATE_LEN];
+        let mut block_bytes = [0u8; BLOCK_LEN];
+
+        for (i, b) in state_bytes.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        for (i, b) in block_bytes.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_add(100);
+        }
+
+        let state = State::from(state_bytes);
+        let block = Block::from(block_bytes);
+
+        let msg = state.assemble_message(&block);
+        assert_eq!(&msg[..STATE_LEN], state_bytes.as_slice());
+        assert_eq!(&msg[STATE_LEN..], block_bytes.as_slice());
     }
 
     #[test]

@@ -9,9 +9,9 @@ PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementat
 ```rust
 use swifft::{compress, Block, Compressor, Key, State};
 
-let key = Key([0u8; swifft::KEY_LEN]); // coefficients are bytes mod 257
-let mut state = State([0u8; swifft::STATE_LEN]);
-let block = Block([0u8; swifft::BLOCK_LEN]);
+let key = Key::default(); // coefficients are bytes mod 257
+let mut state = State::default();
+let block = Block::default();
 
 // Free function
 compress(&key, &mut state, &block);

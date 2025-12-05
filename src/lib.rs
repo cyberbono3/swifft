@@ -30,9 +30,9 @@ pub use crate::core::{Block, Compressor, Key, State};
 /// ```ignore
 /// use swifft_rs::{Key, State, Block, compress};
 ///
-/// let key = Key([0u8; 1024]);
-/// let mut state = State([0u8; 72]);
-/// let block = Block([0u8; 56]);
+/// let key = Key::default();
+/// let mut state = State::default();
+/// let block = Block::default();
 ///
 /// compress(&key, &mut state, &block);
 /// ```
