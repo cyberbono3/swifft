@@ -1,7 +1,7 @@
 use crate::{
     fe,
     field_element::FieldElement,
-    math::{encode_state, transform, M, N},
+    math::{transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
 use core::convert::TryFrom;
@@ -67,6 +67,25 @@ impl State {
         self.0
     }
 
+    pub(crate) fn encode(&mut self, coeffs: &[u16; N]) {
+        self.0 = [0u8; STATE_LEN];
+
+        // Low 8 bits.
+        for (i, coeff) in coeffs.iter().enumerate() {
+            debug_assert!(*coeff <= 256, "coefficient must be in 0..=256");
+            self.0[i] = (coeff & 0xFF) as u8;
+        }
+
+        // High bit (bit 8) packed into the last 8 bytes.
+        for (i, coeff) in coeffs.iter().enumerate() {
+            let hi = (coeff >> 8) & 1;
+            let byte_index = 64 + (i / 8); // 64..71
+            let bit_in_byte = i % 8;
+
+            self.0[byte_index] |= (hi as u8) << bit_in_byte;
+        }
+    }
+
     /// Core SWIFFT compression in-place on this state.
     pub fn compress(&mut self, key: &Key, block: &Block) {
         // 1. Build the 128-byte message buffer.
@@ -97,7 +116,7 @@ impl State {
 
         // 5. Encode back into the 72-byte state buffer.
         let z_u16: [u16; N] = z.map(FieldElement::value);
-        *self = encode_state(&z_u16);
+        self.encode(&z_u16);
     }
 
     pub(crate) fn assemble_message(&self, block: &Block) -> Message {
@@ -278,7 +297,9 @@ mod tests {
         }
 
         pub fn naive_encode(coeffs: &[u16; N]) -> State {
-            math::encode_state(coeffs)
+            let mut state = State::default();
+            state.encode(coeffs);
+            state
         }
 
         pub fn reference_compress(
@@ -357,7 +378,8 @@ mod tests {
         coeffs[10] = 255;
         coeffs[63] = 256;
 
-        let encoded = math::encode_state(&coeffs);
+        let mut encoded = State::default();
+        encoded.encode(&coeffs);
 
         assert_eq!(encoded.0[0], 0);
         assert_eq!(encoded.0[10], 255);
@@ -365,6 +387,23 @@ mod tests {
         assert_eq!(encoded.0[65], 0b0000_0001);
         assert_eq!(encoded.0[71], 0b1000_0000);
         assert_eq!(&encoded.0[66..71], &[0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn encode_overwrites_previous_contents() {
+        let mut state = State([0xAA; STATE_LEN]);
+        let mut coeffs = [0u16; N];
+        coeffs[1] = 1;
+        coeffs[63] = 256;
+
+        state.encode(&coeffs);
+
+        assert_eq!(state.0[0], 0);
+        assert_eq!(state.0[1], 1);
+        assert_eq!(state.0[63], 0);
+        assert_eq!(state.0[71], 0b1000_0000); // high bit of coeff 63.
+                                              // Middle bytes that were previously 0xAA should be reset to 0.
+        assert_eq!(&state.0[10..20], &[0u8; 10]);
     }
 
     #[test]

@@ -1,4 +1,6 @@
-use crate::{fe, field_element::FieldElement, State, STATE_LEN};
+#[cfg(test)]
+use crate::State;
+use crate::{fe, field_element::FieldElement};
 use core::convert::TryFrom;
 
 /// Ring dimension n.
@@ -119,32 +121,6 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
     out
 }
 
-/// Encode 64 coefficients in `Z_257` into the 72-byte digest format.
-///
-/// Layout:
-///   bytes[0..64):  low 8 bits of each coefficient `z_i`.
-///   bytes[64..72): high bit (bit 8) of each `z_i`, packed LSB-first.
-pub(crate) fn encode_state(coeffs: &[u16; N]) -> State {
-    let mut bytes = [0u8; STATE_LEN];
-
-    // Low 8 bits.
-    for (i, coeff) in coeffs.iter().enumerate() {
-        debug_assert!(*coeff <= 256, "coefficient must be in 0..=256");
-        bytes[i] = (coeff & 0xFF) as u8;
-    }
-
-    // High bit (bit 8) packed into the last 8 bytes.
-    for (i, coeff) in coeffs.iter().enumerate() {
-        let hi = (coeff >> 8) & 1;
-        let byte_index = 64 + (i / 8); // 64..71
-        let bit_in_byte = i % 8;
-
-        bytes[byte_index] |= (hi as u8) << bit_in_byte;
-    }
-
-    State(bytes)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,7 +207,8 @@ mod tests {
         coeffs[10] = 255;
         coeffs[63] = 256;
 
-        let encoded = encode_state(&coeffs);
+        let mut encoded = State::default();
+        encoded.encode(&coeffs);
 
         assert_eq!(encoded.0[0], 0);
         assert_eq!(encoded.0[10], 255);
