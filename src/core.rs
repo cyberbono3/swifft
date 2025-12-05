@@ -165,8 +165,9 @@ impl Message {
 mod tests {
     use super::Message;
     use crate::{
+        fe,
         field_element::FieldElement,
-        math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
+        math::{self, fe_add, pow_omega, M, N, OMEGA},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
     use core::convert::TryFrom;
@@ -263,9 +264,9 @@ mod tests {
 
     #[test]
     fn fe_mul_basic() {
-        assert_eq!(fe_mul(30, 30), 129);
-        assert_eq!(fe_mul(256, 2), 255);
-        assert_eq!(fe_mul(0, 123), 0);
+        assert_eq!(fe!(30) * fe!(30), fe!(129));
+        assert_eq!(fe!(256) * fe!(2), fe!(255));
+        assert_eq!(fe!(0) * fe!(23), fe!(0));
     }
 
     #[test]

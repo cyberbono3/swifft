@@ -1,7 +1,6 @@
 #[cfg(test)]
 use crate::State;
 use crate::{fe, field_element::FieldElement};
-use core::convert::TryFrom;
 
 /// Ring dimension n.
 pub(crate) const N: usize = 64;
@@ -10,74 +9,9 @@ pub(crate) const M: usize = 16;
 /// A 128th root of unity modulo 257 (order exactly 128).
 pub(crate) const OMEGA: u16 = 42;
 
-#[allow(clippy::cast_possible_truncation)] // bounded by P = 257
-const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
-    FieldElement::montyred((a as u32) * (b as u32))
-}
-
-const TWIDDLE: [[u16; N]; N] = precompute_twiddle();
-
-#[allow(clippy::cast_possible_truncation)] // i,k are always < 64
-const fn precompute_twiddle() -> [[u16; N]; N] {
-    let mut table = [[0u16; N]; N];
-    let mut i = 0;
-    while i < N {
-        let factor = (2 * (i as u32)) + 1;
-        let mut k = 0;
-        while k < N {
-            let exponent = factor * (k as u32);
-            table[i][k] = pow_omega_const(exponent);
-            k += 1;
-        }
-        i += 1;
-    }
-    table
-}
-
-// #[allow(clippy::cast_possible_truncation)] // bounded by P = 257
-// const fn fe_mul_const_int(a: u16, b: u16) -> FieldElement {
-//     FieldElement::from(a) * FieldElement::from(b)
-// }
-
 #[inline]
 pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
     (fe!(a) + fe!(b)).value()
-}
-
-#[inline]
-#[allow(dead_code)]
-pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
-    (fe!(a) * fe!(b)).value()
-}
-
-/// Compute OMEGA^exp mod 257 using the precomputed table.
-#[inline]
-#[allow(dead_code)] // used in tests and for debugging
-pub(crate) fn pow_omega(exp: u32) -> u16 {
-    pow_table()[exp_index(exp)].value()
-}
-
-#[inline]
-#[allow(dead_code)] // paired with pow_omega
-fn exp_index(exp: u32) -> usize {
-    usize::try_from(exp & 0x7F).expect("exp reduced to <128")
-}
-
-/// Compute OMEGA^exp mod 257 (const-friendly for build-time tables).
-const fn pow_omega_const(exp: u32) -> u16 {
-    let mut e = exp & 0x7F;
-    let mut result: u16 = 1;
-    let mut base: u16 = OMEGA;
-
-    while e > 0 {
-        if (e & 1) != 0 {
-            result = fe_mul_const_int(result, base);
-        }
-        base = fe_mul_const_int(base, base);
-        e >>= 1;
-    }
-
-    result
 }
 
 /// Lazy runtime table for ω^k.
@@ -97,6 +31,53 @@ fn pow_table() -> &'static [FieldElement; 128] {
     })
 }
 
+#[inline]
+fn pow_table_get(exp: u32) -> FieldElement {
+    pow_table()[exp_index(exp)]
+}
+
+/// Compute OMEGA^exp mod 257 using the precomputed table.
+#[inline]
+#[allow(dead_code)] // used in tests and for debugging
+pub(crate) fn pow_omega(exp: u32) -> u16 {
+    pow_table_get(exp).value()
+}
+
+#[inline]
+#[allow(dead_code)] // paired with pow_omega
+fn exp_index(exp: u32) -> usize {
+    reduce_exp(exp)
+}
+
+#[inline]
+const fn reduce_exp(exp: u32) -> usize {
+    // Reduce modulo 128 (order of omega) before casting to usize.
+    (exp & 0x7F) as usize
+}
+
+/// Lazy twiddle matrix for the transform.
+#[allow(clippy::cast_possible_truncation)] // i,k < N=64 so casts to u32 are safe
+fn twiddle() -> &'static [[u16; N]; N] {
+    use std::sync::OnceLock;
+
+    static TWIDDLE: OnceLock<[[u16; N]; N]> = OnceLock::new();
+    TWIDDLE.get_or_init(|| {
+        let mut table = [[0u16; N]; N];
+        let mut i = 0;
+        while i < N {
+            let factor = (2 * (i as u32)) + 1;
+            let mut k = 0;
+            while k < N {
+                let exponent = factor * (k as u32);
+                table[i][k] = pow_omega(exponent);
+                k += 1;
+            }
+            i += 1;
+        }
+        table
+    })
+}
+
 /// Compute F(x) for a 64-bit vector x ∈ {0,1}^64 using a precomputed twiddle matrix.
 ///
 /// Formula (paper):
@@ -106,7 +87,7 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
 
     for (i, out_i) in out.iter_mut().enumerate() {
         let mut acc: u16 = 0;
-        let twiddle_row = &TWIDDLE[i];
+        let twiddle_row = &twiddle()[i];
 
         for (bit, &omega_pow) in bits.iter().zip(twiddle_row.iter()) {
             debug_assert!(*bit <= 1, "transform bits must be 0/1");
@@ -139,27 +120,10 @@ mod tests {
     }
 
     #[test]
-    fn fe_mul_const_int_matches_field_mul() {
-        let cases = [(0u16, 0u16), (1, 1), (2, 256), (123, 45), (OMEGA, OMEGA)];
-
-        for (a, b) in cases {
-            let expected = (fe!(a) * fe!(b)).value();
-            assert_eq!(fe_mul_const_int(a, b), expected);
-        }
-    }
-
-    #[test]
     fn pow_omega_matches_naive_pow() {
         for exp in 0..256u32 {
             let expected = pow_mod(OMEGA as u32, exp, FieldElement::P as u32);
             assert_eq!(pow_omega(exp), expected, "exp {}", exp);
-        }
-    }
-
-    #[test]
-    fn pow_omega_const_agrees_with_runtime() {
-        for exp in 0..256u32 {
-            assert_eq!(pow_omega_const(exp), pow_omega(exp), "exp {}", exp);
         }
     }
 
