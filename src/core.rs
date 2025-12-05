@@ -4,6 +4,7 @@ use crate::{
     math::{encode_state, transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
+use core::convert::TryFrom;
 
 /// SWIFFT key: 1024-byte vector interpreted as coefficients in `Z_257`.
 ///
@@ -12,6 +13,40 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Key(pub [u8; KEY_LEN]);
 
+impl Key {
+    /// Borrow the underlying bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; KEY_LEN] {
+        &self.0
+    }
+
+    /// Consume and return the inner array.
+    #[must_use]
+    pub const fn into_inner(self) -> [u8; KEY_LEN] {
+        self.0
+    }
+}
+
+impl Default for Key {
+    fn default() -> Self {
+        Self([0u8; KEY_LEN])
+    }
+}
+
+impl From<[u8; KEY_LEN]> for Key {
+    fn from(bytes: [u8; KEY_LEN]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl TryFrom<&[u8]> for Key {
+    type Error = core::array::TryFromSliceError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
 /// 72-byte chaining state / digest encoding.
 ///
 /// First 64 bytes: low 8 bits of each coefficient.
@@ -19,9 +54,77 @@ pub struct Key(pub [u8; KEY_LEN]);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct State(pub [u8; STATE_LEN]);
 
+impl State {
+    /// Borrow the underlying bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; STATE_LEN] {
+        &self.0
+    }
+
+    /// Consume and return the inner array.
+    #[must_use]
+    pub const fn into_inner(self) -> [u8; STATE_LEN] {
+        self.0
+    }
+}
+
+impl Default for State {
+    fn default() -> Self {
+        Self([0u8; STATE_LEN])
+    }
+}
+
+impl From<[u8; STATE_LEN]> for State {
+    fn from(bytes: [u8; STATE_LEN]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl TryFrom<&[u8]> for State {
+    type Error = core::array::TryFromSliceError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
+
 /// 56-byte message block.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Block(pub [u8; BLOCK_LEN]);
+
+impl Block {
+    /// Borrow the underlying bytes.
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; BLOCK_LEN] {
+        &self.0
+    }
+
+    /// Consume and return the inner array.
+    #[must_use]
+    pub const fn into_inner(self) -> [u8; BLOCK_LEN] {
+        self.0
+    }
+}
+
+impl Default for Block {
+    fn default() -> Self {
+        Self([0u8; BLOCK_LEN])
+    }
+}
+
+impl From<[u8; BLOCK_LEN]> for Block {
+    fn from(bytes: [u8; BLOCK_LEN]) -> Self {
+        Self(bytes)
+    }
+}
+
+impl TryFrom<&[u8]> for Block {
+    type Error = core::array::TryFromSliceError;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        value.try_into().map(Self)
+    }
+}
 
 /// Trait abstraction for SWIFFT-like compressors.
 pub trait Compressor {
@@ -111,6 +214,7 @@ mod tests {
         math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
+    use core::convert::TryFrom;
 
     mod helpers {
         use super::*;
@@ -275,5 +379,31 @@ mod tests {
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
+    }
+
+    #[test]
+    fn constructors_cover_common_paths() {
+        let key_bytes = [7u8; KEY_LEN];
+        let state_bytes = [3u8; STATE_LEN];
+        let block_bytes = [5u8; BLOCK_LEN];
+
+        let key_from_array = Key::from(key_bytes);
+        let state_from_array = State::from(state_bytes);
+        let block_from_array = Block::from(block_bytes);
+
+        assert_eq!(key_from_array.as_bytes(), &key_bytes);
+        assert_eq!(state_from_array.as_bytes(), &state_bytes);
+        assert_eq!(block_from_array.as_bytes(), &block_bytes);
+
+        let key_try = Key::try_from(key_bytes.as_slice()).unwrap();
+        let state_try = State::try_from(state_bytes.as_slice()).unwrap();
+        let block_try = Block::try_from(block_bytes.as_slice()).unwrap();
+
+        assert_eq!(key_try.into_inner(), key_bytes);
+        assert_eq!(state_try.into_inner(), state_bytes);
+        assert_eq!(block_try.into_inner(), block_bytes);
+
+        let short = [0u8; KEY_LEN - 1];
+        assert!(Key::try_from(short.as_slice()).is_err());
     }
 }
