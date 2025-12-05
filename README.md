@@ -1,22 +1,22 @@
 PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP)
 
 - Clean-room Rust port of the n=64, m=16, p=257 parameters.
-- `no_std`-ready; the default `std` feature can be disabled.
+- Requires `std` for now (no `no_std` support).
 - Optional feature flags reserved for future optimizations: `parallel`, `simd`.
 
 ## Usage
 
 ```rust
-use swifft::{compress, Block, Compressor, Key, State};
+use swifft::{Block, Key, State};
 
-let key = Key([0u8; swifft::KEY_LEN]); // coefficients are bytes mod 257
-let mut state = State([0u8; swifft::STATE_LEN]);
-let block = Block([0u8; swifft::BLOCK_LEN]);
+let key = Key::default(); // coefficients are bytes mod 257
+let mut state = State::default();
+let block = Block::default();
 
-// Free function
-compress(&key, &mut state, &block);
+// Inherent method on State
+state.compress(&key, &block);
 
-// Or via the `Compressor` trait
+// Or via the inherent method on Key
 key.compress(&mut state, &block);
 ```
 

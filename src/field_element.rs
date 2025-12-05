@@ -1,7 +1,10 @@
 use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 
-/// Prime modulus p.
-pub const P: u16 = 257;
+#[cfg(test)]
+use proptest::{
+    arbitrary::Arbitrary,
+    strategy::{BoxedStrategy, Strategy},
+};
 
 /// Lightweight field element wrapper for `F_257`.
 ///
@@ -13,10 +16,38 @@ pub const P: u16 = 257;
 pub struct FieldElement(pub u16);
 
 #[macro_export]
+/// Construct a `FieldElement` modulo 257.
+///
+/// # Examples
+/// ```
+/// use swifft::fe;
+///
+/// let small = fe!(5);
+/// let reduced = fe!(300); // 300 ≡ 43 (mod 257)
+///
+/// assert_eq!(small.value(), 5);
+/// assert_eq!(reduced.value(), 43);
+/// assert_eq!(fe!(1) + fe!(2), fe!(3));
+/// assert_eq!(fe!(10) + fe!(20), fe!(30));
+/// // Addition wraps modulo 257.
+/// assert_eq!(fe!(200) + fe!(100), fe!(43));
+/// ```
 macro_rules! fe {
     ($value:expr) => {
         $crate::field_element::FieldElement::from($value)
     };
+}
+
+#[cfg(test)]
+impl Arbitrary for FieldElement {
+    type Parameters = ();
+    type Strategy = BoxedStrategy<FieldElement>;
+
+    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+        (0u16..=FieldElement::MAX)
+            .prop_map(FieldElement::from)
+            .boxed()
+    }
 }
 
 /// Create a `FieldElement` from a numeric literal or expression.
@@ -33,8 +64,11 @@ macro_rules! fe {
 pub use crate::fe;
 
 impl FieldElement {
+    /// Prime modulus p.
+    pub const P: u16 = 257;
+
     pub const BYTES: usize = 2;
-    pub const MAX: u16 = P - 1;
+    pub const MAX: u16 = Self::P - 1;
     pub const ZERO: Self = Self(0);
     pub const ONE: Self = Self(1);
     /// R = 2^16 for Montgomery reduction.
@@ -45,7 +79,7 @@ impl FieldElement {
 
     #[inline]
     pub const fn new(v: u16) -> Self {
-        Self(v % P)
+        Self(v % Self::P)
     }
 
     #[inline]
@@ -57,7 +91,7 @@ impl FieldElement {
     #[inline]
     #[must_use]
     pub const fn is_canonical(v: u16) -> bool {
-        v < P
+        v < Self::P
     }
 
     #[inline]
@@ -88,7 +122,7 @@ impl FieldElement {
     #[allow(dead_code)] // handy for future algebraic ops
     pub fn inv(self) -> Self {
         // Fermat's little theorem: a^(p-2) mod p for prime p.
-        self.pow(P - 2)
+        self.pow(Self::P - 2)
     }
 
     /// Montgomery reduction for 16-bit modulus P = 257 with R = 2^16.
@@ -99,11 +133,11 @@ impl FieldElement {
         let m = (x.wrapping_mul(Self::N_PRIME as u32)) & Self::R_MASK;
 
         // t = (x + m * P) / R
-        let t = (x.wrapping_add(m * (P as u32))) >> Self::R_BITS;
+        let t = (x.wrapping_add(m * (Self::P as u32))) >> Self::R_BITS;
         let t16 = t as u16;
 
-        if t16 >= P {
-            t16 - P
+        if t16 >= Self::P {
+            t16 - Self::P
         } else {
             t16
         }
@@ -130,8 +164,8 @@ impl Add for FieldElement {
     #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         let sum = self.0 + rhs.0;
-        if sum >= P {
-            FieldElement(sum - P)
+        if sum >= Self::P {
+            FieldElement(sum - Self::P)
         } else {
             FieldElement(sum)
         }
@@ -170,7 +204,7 @@ impl Sub for FieldElement {
         if self.0 >= rhs.0 {
             FieldElement(self.0 - rhs.0)
         } else {
-            FieldElement(self.0 + P - rhs.0)
+            FieldElement(self.0 + Self::P - rhs.0)
         }
     }
 }
@@ -190,7 +224,7 @@ impl Neg for FieldElement {
         if self.0 == 0 {
             FieldElement::ZERO
         } else {
-            FieldElement(P - self.0)
+            FieldElement(Self::P - self.0)
         }
     }
 }
@@ -201,23 +235,118 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
+    fn new_value_and_macro_reduction() {
+        let from_new = FieldElement::new(300);
+        assert_eq!(from_new.value(), 43);
+
+        let from_macro = fe!(1 + 2);
+        assert_eq!(from_macro.value(), 3);
+        assert_eq!(fe!(300), fe!(43));
+    }
+
+    #[test]
+    fn canonical_helpers() {
+        assert!(FieldElement::is_canonical(0));
+        assert!(FieldElement::is_canonical(FieldElement::MAX));
+        assert!(!FieldElement::is_canonical(FieldElement::P));
+
+        assert_eq!(FieldElement::from_canonical(42), Some(fe!(42)));
+        assert_eq!(FieldElement::from_canonical(999), None);
+    }
+
+    #[test]
+    fn conversions_and_constants() {
+        let fe_from_u16 = FieldElement::from(300u16);
+        assert_eq!(fe_from_u16, fe!(43));
+
+        let as_u16: u16 = fe!(255).into();
+        assert_eq!(as_u16, 255);
+
+        assert_eq!(FieldElement::ZERO, fe!(0));
+        assert_eq!(FieldElement::ONE, fe!(1));
+        assert_eq!(FieldElement::BYTES, 2);
+    }
+
+    #[test]
+    fn pow_and_inv_cover_edge_cases() {
+        assert_eq!(fe!(7).pow(0), FieldElement::ONE);
+        assert_eq!(fe!(7).pow(1), fe!(7));
+        assert_eq!(fe!(2).pow(8), fe!(256)); // 2^8 mod 257
+
+        let inv = fe!(3).inv();
+        assert_eq!(inv, fe!(86)); // 3 * 86 = 258 ≡ 1 (mod 257)
+        assert_eq!(fe!(3) * inv, FieldElement::ONE);
+    }
+
+    #[test]
+    fn montyred_reduces_modulus() {
+        assert_eq!(FieldElement::montyred(0), 0);
+        assert_eq!(FieldElement::montyred(FieldElement::P as u32), 0);
+        assert_eq!(FieldElement::montyred(512), 255);
+    }
+
+    #[test]
+    fn add_and_add_assign_wrap() {
+        let mut a = fe!(200);
+        assert_eq!(a + fe!(100), fe!(43));
+
+        a += fe!(100);
+        assert_eq!(a, fe!(43));
+    }
+
+    #[test]
+    fn sub_and_sub_assign_wrap() {
+        let mut a = fe!(10);
+        assert_eq!(a - fe!(20), fe!(247));
+
+        a -= fe!(20);
+        assert_eq!(a, fe!(247));
+    }
+
+    #[test]
+    fn mul_and_mul_assign_modular() {
+        let mut a = fe!(13);
+        let b = fe!(7);
+
+        assert_eq!(a * b, fe!(91));
+        a *= b;
+        assert_eq!(a, fe!(91));
+    }
+
+    #[test]
+    fn negation_handles_zero_and_non_zero() {
+        assert_eq!(-FieldElement::ZERO, FieldElement::ZERO);
+        assert_eq!(-fe!(5), fe!(252)); // 257 - 5
+    }
+
+    #[test]
     fn add_sub_mul_basic() {
-        let a = FieldElement::new(200);
-        let b = FieldElement::new(100);
-        assert_eq!((a + b).value(), 43); // 300 mod 257
-        assert_eq!((a - b).value(), 100);
-        assert_eq!((b - a).value(), 157); // wrap
-        assert_eq!((a * b).value(), (200u32 * 100u32 % 257) as u16);
+        let a = fe!(200);
+        let b = fe!(100);
+        assert_eq!(a + b, fe!(43)); // 300 mod 257
+        assert_eq!(a - b, fe!(100));
+        assert_eq!(b - a, fe!(157)); // wrap
+        assert_eq!(a * b, fe!(211));
     }
 
     proptest! {
         #[test]
+        fn add_commutative(a: FieldElement, b: FieldElement) {
+            prop_assert_eq!(a + b, b + a);
+        }
+
+        #[test]
+        fn mul_distributes_over_add(a: FieldElement, b: FieldElement, c: FieldElement) {
+            prop_assert_eq!(a * (b + c), (a * b) + (a * c));
+        }
+
+        #[test]
         fn pow_matches_naive(a in 0u16..=256, e in 0u16..=512) {
-            let a_fe = FieldElement::new(a);
+            let a_fe = fe!(a);
             let fast = a_fe.pow(e).value();
             let mut naive = 1u32;
             for _ in 0..e {
-                naive = (naive * a as u32) % (P as u32);
+                naive = (naive * a as u32) % (FieldElement::P as u32);
             }
             prop_assert_eq!(fast, naive as u16);
         }
@@ -225,16 +354,16 @@ mod tests {
         #[test]
         fn montyred_matches_mod_reduce(x in 0u32..100_000u32) {
             let reduced = FieldElement::montyred(x);
-            prop_assert!(reduced < P);
-            prop_assert_eq!(reduced as u32, x % (P as u32));
+            prop_assert!(reduced < FieldElement::P);
+            prop_assert_eq!(reduced as u32, x % (FieldElement::P as u32));
         }
 
         #[test]
         fn neg_and_inv_properties(a in 1u16..=256) { // avoid zero for inverse
-            let fe = FieldElement::new(a);
-            prop_assert_eq!((fe + (-fe)).value(), 0);
+            let fe = fe!(a);
+            prop_assert_eq!(fe + (-fe), fe!(0));
             let inv = fe.inv();
-            prop_assert_eq!((fe * inv).value(), 1);
+            prop_assert_eq!(fe * inv, fe!(1));
         }
     }
 }
