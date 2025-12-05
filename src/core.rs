@@ -89,7 +89,7 @@ impl State {
     /// Core SWIFFT compression in-place on this state.
     pub fn compress(&mut self, key: &Key, block: &Block) {
         // 1. Build the 128-byte message buffer.
-        let msg = self.assemble_message(block);
+        let msg = Message::new(self, block);
 
         // 2–3. Compute y[j][i] = F(x_j)_i.
         //
@@ -117,13 +117,6 @@ impl State {
         // 5. Encode back into the 72-byte state buffer.
         let z_u16: [u16; N] = z.map(FieldElement::value);
         self.encode(&z_u16);
-    }
-
-    pub(crate) fn assemble_message(&self, block: &Block) -> Message {
-        let mut msg = [0u8; MSG_LEN];
-        msg[..STATE_LEN].copy_from_slice(&self.0);
-        msg[STATE_LEN..].copy_from_slice(&block.0);
-        Message(msg)
     }
 }
 
@@ -202,6 +195,13 @@ const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
 pub(crate) struct Message([u8; MSG_LEN]);
 
 impl Message {
+    pub(crate) fn new(state: &State, block: &Block) -> Self {
+        let mut msg = [0u8; MSG_LEN];
+        msg[..STATE_LEN].copy_from_slice(&state.0);
+        msg[STATE_LEN..].copy_from_slice(&block.0);
+        Self(msg)
+    }
+
     #[must_use]
     #[cfg_attr(not(test), allow(dead_code))]
     pub const fn as_bytes(&self) -> &[u8; MSG_LEN] {
@@ -249,6 +249,7 @@ pub fn compress(key: &Key, state: &mut State, block: &Block) {
 #[cfg(test)]
 mod tests {
     use super::compress;
+    use super::Message;
     use crate::{
         field_element::FieldElement,
         math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
@@ -307,7 +308,7 @@ mod tests {
             state: &State,
             block: &Block,
         ) -> State {
-            let msg = state.assemble_message(block);
+            let msg = Message::new(state, block);
 
             let mut y = [[0u16; N]; M];
 
@@ -481,9 +482,28 @@ mod tests {
         let state = State::from(state_bytes);
         let block = Block::from(block_bytes);
 
-        let msg = state.assemble_message(&block);
+        let msg = Message::new(&state, &block);
         assert_eq!(&msg.as_bytes()[..STATE_LEN], state_bytes.as_slice());
         assert_eq!(&msg.as_bytes()[STATE_LEN..], block_bytes.as_slice());
+    }
+
+    #[test]
+    fn message_new_copies_state_and_block() {
+        let mut state = State([0u8; STATE_LEN]);
+        let mut block = Block([0u8; BLOCK_LEN]);
+
+        for (i, b) in state.0.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(2);
+        }
+        for (i, b) in block.0.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_mul(3).wrapping_add(1);
+        }
+
+        let msg = Message::new(&state, &block);
+        let bytes = msg.as_bytes();
+
+        assert_eq!(&bytes[..STATE_LEN], state.0.as_slice());
+        assert_eq!(&bytes[STATE_LEN..], block.0.as_slice());
     }
 
     #[test]
@@ -498,7 +518,7 @@ mod tests {
 
         let state = State::from(state_bytes);
         let block = Block::from(block_bytes);
-        let msg = state.assemble_message(&block);
+        let msg = Message::new(&state, &block);
 
         let col0 = msg.extract_column_bits(0);
         assert_eq!(col0[0], 1);
