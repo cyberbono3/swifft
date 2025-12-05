@@ -2,8 +2,37 @@ use crate::{
     fe,
     field_element::FieldElement,
     math::{encode_state, transform, M, N},
-    Block, Key, State, BLOCK_LEN, STATE_LEN,
+    BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
+
+/// SWIFFT key: 1024-byte vector interpreted as coefficients in `Z_257`.
+///
+/// Logically this is a 16×64 matrix (a_{i,j}) with entries in {0,…,256},
+/// stored as bytes 0..255 (mod 257).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Key(pub [u8; KEY_LEN]);
+
+/// 72-byte chaining state / digest encoding.
+///
+/// First 64 bytes: low 8 bits of each coefficient.
+/// Last 8 bytes: one extra bit per coefficient (bit 8), packed LSB-first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct State(pub [u8; STATE_LEN]);
+
+/// 56-byte message block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Block(pub [u8; BLOCK_LEN]);
+
+/// Trait abstraction for SWIFFT-like compressors.
+pub trait Compressor {
+    fn compress(&self, state: &mut State, block: &Block);
+}
+
+impl Compressor for Key {
+    fn compress(&self, state: &mut State, block: &Block) {
+        compress(self, state, block);
+    }
+}
 
 const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
 type Message = [u8; MSG_LEN];
