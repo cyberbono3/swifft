@@ -144,13 +144,13 @@ pub struct Block(pub [u8; BLOCK_LEN]);
 
 impl Block {
     /// Borrow the underlying bytes.
-    #[must_use]
+    #[cfg(test)]
     pub const fn as_bytes(&self) -> &[u8; BLOCK_LEN] {
         &self.0
     }
 
     /// Consume and return the inner array.
-    #[must_use]
+    #[cfg(test)]
     pub const fn into_inner(self) -> [u8; BLOCK_LEN] {
         self.0
     }
