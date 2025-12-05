@@ -7,7 +7,7 @@ PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementat
 ## Usage
 
 ```rust
-use swifft::{Block, Compressor, Key, State};
+use swifft::{Block, Key, State};
 
 let key = Key::default(); // coefficients are bytes mod 257
 let mut state = State::default();
@@ -16,7 +16,7 @@ let block = Block::default();
 // Inherent method on State
 state.compress(&key, &block);
 
-// Or via the `Compressor` trait on Key
+// Or via the inherent method on Key
 key.compress(&mut state, &block);
 ```
 

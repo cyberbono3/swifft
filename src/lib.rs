@@ -21,4 +21,4 @@ pub mod core;
 pub mod field_element;
 pub(crate) mod math;
 
-pub use crate::core::{Block, Compressor, Key, State};
+pub use crate::core::{Block, Key, State};

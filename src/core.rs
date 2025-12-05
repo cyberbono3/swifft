@@ -176,17 +176,6 @@ impl TryFrom<&[u8]> for Block {
     }
 }
 
-/// Trait abstraction for SWIFFT-like compressors.
-pub trait Compressor {
-    fn compress(&self, state: &mut State, block: &Block);
-}
-
-impl Compressor for Key {
-    fn compress(&self, state: &mut State, block: &Block) {
-        state.compress(self, block);
-    }
-}
-
 const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -224,7 +213,7 @@ impl Message {
 
 #[cfg(test)]
 mod tests {
-    use super::{Compressor, Message};
+    use super::Message;
     use crate::{
         field_element::FieldElement,
         math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
@@ -388,7 +377,7 @@ mod tests {
         let mut state = State([0xAA; STATE_LEN]);
         let block = Block([0x55; BLOCK_LEN]);
 
-        key.compress(&mut state, &block);
+        state.compress(&key, &block);
 
         assert_eq!(state.0, [0u8; STATE_LEN]);
     }
@@ -411,7 +400,7 @@ mod tests {
         }
 
         let mut fast = state_input.clone();
-        key.compress(&mut fast, &block);
+        fast.compress(&key, &block);
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
@@ -437,7 +426,7 @@ mod tests {
         }
 
         state_a.compress(&key, &block);
-        key.compress(&mut state_b, &block);
+        state_b.compress(&key, &block);
 
         assert_eq!(state_a, state_b);
     }
