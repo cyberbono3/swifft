@@ -22,18 +22,3 @@ pub mod field_element;
 pub(crate) mod math;
 
 pub use crate::core::{Block, Compressor, Key, State};
-
-/// Convenience re-export of the compression function.
-///
-/// This is the main entry point you’ll typically call:
-///
-/// ```ignore
-/// use swifft_rs::{Key, State, Block, compress};
-///
-/// let key = Key::default();
-/// let mut state = State::default();
-/// let block = Block::default();
-///
-/// compress(&key, &mut state, &block);
-/// ```
-pub use crate::core::compress;

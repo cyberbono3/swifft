@@ -96,10 +96,8 @@ impl State {
         // Here:
         //   - j = column index   (0..15)
         //   - i = output index   (0..63)
-        let y: [[FieldElement; N]; M] = core::array::from_fn(|j| {
-            let bits = msg.extract_column_bits(j);
-            transform(&bits).map(FieldElement::from)
-        });
+        let y: [[FieldElement; N]; M] =
+            core::array::from_fn(|j| msg.transform_column(j));
 
         // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
         //
@@ -185,7 +183,7 @@ pub trait Compressor {
 
 impl Compressor for Key {
     fn compress(&self, state: &mut State, block: &Block) {
-        compress(self, state, block);
+        state.compress(self, block);
     }
 }
 
@@ -200,18 +198,6 @@ impl Message {
         msg[..STATE_LEN].copy_from_slice(&state.0);
         msg[STATE_LEN..].copy_from_slice(&block.0);
         Self(msg)
-    }
-
-    #[must_use]
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub const fn as_bytes(&self) -> &[u8; MSG_LEN] {
-        &self.0
-    }
-
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn into_inner(self) -> [u8; MSG_LEN] {
-        self.0
     }
 
     pub(crate) fn extract_column_bits(&self, column: usize) -> [u8; N] {
@@ -229,27 +215,16 @@ impl Message {
         }
         bits
     }
-}
 
-/// Core SWIFFT compression function.
-///
-/// Conceptually:
-/// 1. Form a 1024-bit message from `state || block`.
-/// 2. View it as 16 vectors `x_j` ∈ {0,1}^64 (columns).
-/// 3. Apply the FFT-based map F on each `x_j`:
-///    F(x)_i = `Σ_k` `x_k` · ω^{(2i+1)k} mod 257
-/// 4. Combine columns:
-///    `z_i` = `Σ_j` `a_{i,j}` · y_{j,i} mod 257
-///    where a_{i,j} comes from the key.
-/// 5. Encode the 64 coefficients `z_i` ∈ {0,…,256} into 72 bytes.
-pub fn compress(key: &Key, state: &mut State, block: &Block) {
-    state.compress(key, block);
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) fn transform_column(&self, column: usize) -> [FieldElement; N] {
+        transform(&self.extract_column_bits(column)).map(FieldElement::from)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::compress;
-    use super::Message;
+    use super::{Compressor, Message};
     use crate::{
         field_element::FieldElement,
         math::{self, fe_add, fe_mul, pow_omega, M, N, OMEGA},
@@ -413,7 +388,7 @@ mod tests {
         let mut state = State([0xAA; STATE_LEN]);
         let block = Block([0x55; BLOCK_LEN]);
 
-        compress(&key, &mut state, &block);
+        key.compress(&mut state, &block);
 
         assert_eq!(state.0, [0u8; STATE_LEN]);
     }
@@ -436,7 +411,7 @@ mod tests {
         }
 
         let mut fast = state_input.clone();
-        compress(&key, &mut fast, &block);
+        key.compress(&mut fast, &block);
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
@@ -462,7 +437,7 @@ mod tests {
         }
 
         state_a.compress(&key, &block);
-        compress(&key, &mut state_b, &block);
+        key.compress(&mut state_b, &block);
 
         assert_eq!(state_a, state_b);
     }
@@ -483,8 +458,8 @@ mod tests {
         let block = Block::from(block_bytes);
 
         let msg = Message::new(&state, &block);
-        assert_eq!(&msg.as_bytes()[..STATE_LEN], state_bytes.as_slice());
-        assert_eq!(&msg.as_bytes()[STATE_LEN..], block_bytes.as_slice());
+        assert_eq!(&msg.0[..STATE_LEN], state_bytes.as_slice());
+        assert_eq!(&msg.0[STATE_LEN..], block_bytes.as_slice());
     }
 
     #[test]
@@ -500,10 +475,8 @@ mod tests {
         }
 
         let msg = Message::new(&state, &block);
-        let bytes = msg.as_bytes();
-
-        assert_eq!(&bytes[..STATE_LEN], state.0.as_slice());
-        assert_eq!(&bytes[STATE_LEN..], block.0.as_slice());
+        assert_eq!(&msg.0[..STATE_LEN], state.0.as_slice());
+        assert_eq!(&msg.0[STATE_LEN..], block.0.as_slice());
     }
 
     #[test]
@@ -533,6 +506,67 @@ mod tests {
         assert_eq!(col9[6], 1);
         assert_eq!(col9[0], 0);
         assert_eq!(col9[2], 0);
+    }
+
+    #[test]
+    fn transform_column_matches_direct_transform() {
+        let mut state_bytes = [0u8; STATE_LEN];
+        let block_bytes = [0u8; BLOCK_LEN];
+
+        // Set a few bits that land in column 2.
+        // Column 2 covers bit indices 128..191 (bytes 16..23).
+        state_bytes[16] = 0b0000_1001; // bits 128 and 131 set.
+        state_bytes[18] = 0b0001_0000; // bit 144 set.
+
+        let state = State::from(state_bytes);
+        let block = Block::from(block_bytes);
+        let msg = Message::new(&state, &block);
+
+        let direct = math::transform(&msg.extract_column_bits(2));
+        let via_method = msg.transform_column(2).map(FieldElement::value);
+
+        assert_eq!(via_method, direct);
+    }
+
+    #[test]
+    fn transform_column_reads_from_block_region() {
+        let state_bytes = [0u8; STATE_LEN];
+        let mut block_bytes = [0u8; BLOCK_LEN];
+
+        // Column 9 starts at byte 72; set a few bits in block[0].
+        block_bytes[0] = 0b0001_1010; // bits 1, 3, and 4 set for column 9.
+
+        let state = State::from(state_bytes);
+        let block = Block::from(block_bytes);
+        let msg = Message::new(&state, &block);
+
+        let bits = msg.extract_column_bits(9);
+        let expected = helpers::naive_transform(&bits);
+        let via_method = msg.transform_column(9).map(FieldElement::value);
+
+        assert_eq!(via_method, expected);
+    }
+
+    #[test]
+    fn transform_column_handles_empty_and_full_columns() {
+        let state = State::default();
+        let block = Block::default();
+        let msg = Message::new(&state, &block);
+
+        // Empty column should be all zeros.
+        let empty = msg.transform_column(5).map(FieldElement::value);
+        assert!(empty.iter().all(|&v| v == 0));
+
+        // Fill a column with all ones in the message.
+        let mut state_bytes = [0u8; STATE_LEN];
+        // Column 1 covers bits 64..127 -> bytes 8..15.
+        state_bytes[8..16].fill(0xFF);
+        let msg_full = Message::new(&State::from(state_bytes), &block);
+        let bits_full = msg_full.extract_column_bits(1);
+        let expected_full = helpers::naive_transform(&bits_full);
+        let via_method_full =
+            msg_full.transform_column(1).map(FieldElement::value);
+        assert_eq!(via_method_full, expected_full);
     }
 
     #[test]
