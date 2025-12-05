@@ -4,69 +4,69 @@ use crate::{
     math::{transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
-use core::convert::TryFrom;
 
-/// SWIFFT key: 1024-byte vector interpreted as coefficients in `Z_257`.
-///
-/// Logically this is a 16×64 matrix (a_{i,j}) with entries in {0,…,256},
-/// stored as bytes 0..255 (mod 257).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Key(pub [u8; KEY_LEN]);
+macro_rules! define_byte_newtype {
+    ($(#[$meta:meta])* $name:ident, $len:expr) => {
+        $(#[$meta])*
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub struct $name(pub [u8; $len]);
 
-impl Key {
-    /// Borrow the underlying bytes.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; KEY_LEN] {
-        &self.0
-    }
+        impl $name {
+            /// Borrow the underlying byte array.
+            #[must_use]
+            pub const fn as_bytes(&self) -> &[u8; $len] {
+                &self.0
+            }
 
-    /// Consume and return the inner array.
-    #[must_use]
-    pub const fn into_inner(self) -> [u8; KEY_LEN] {
-        self.0
-    }
+            /// Consume and return the inner byte array.
+            #[must_use]
+            pub const fn into_inner(self) -> [u8; $len] {
+                self.0
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self([0u8; $len])
+            }
+        }
+
+        impl From<[u8; $len]> for $name {
+            fn from(bytes: [u8; $len]) -> Self {
+                Self(bytes)
+            }
+        }
+
+        impl TryFrom<&[u8]> for $name {
+            type Error = core::array::TryFromSliceError;
+
+            fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+                value.try_into().map(Self)
+            }
+        }
+    };
 }
 
-impl Default for Key {
-    fn default() -> Self {
-        Self([0u8; KEY_LEN])
-    }
-}
+define_byte_newtype!(
+    /// SWIFFT key: 1024-byte vector interpreted as coefficients in `Z_257`.
+    ///
+    /// Logically this is a 16×64 matrix (a_{i,j}) with entries in {0,…,256},
+    /// stored as bytes 0..255 (mod 257).
+    Key,
+    KEY_LEN
+);
 
-impl From<[u8; KEY_LEN]> for Key {
-    fn from(bytes: [u8; KEY_LEN]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl TryFrom<&[u8]> for Key {
-    type Error = core::array::TryFromSliceError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        value.try_into().map(Self)
-    }
-}
-
-/// 72-byte chaining state / digest encoding.
-///
-/// First 64 bytes: low 8 bits of each coefficient.
-/// Last 8 bytes: one extra bit per coefficient (bit 8), packed LSB-first.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct State(pub [u8; STATE_LEN]);
+define_byte_newtype!(
+    /// 72-byte chaining state / digest encoding.
+    ///
+    /// First 64 bytes: low 8 bits of each coefficient.
+    /// Last 8 bytes: one extra bit per coefficient (bit 8), packed LSB-first.
+    State,
+    STATE_LEN
+);
 
 impl State {
-    /// Borrow the underlying bytes.
-    #[must_use]
-    pub const fn as_bytes(&self) -> &[u8; STATE_LEN] {
-        &self.0
-    }
-
-    /// Consume and return the inner array.
-    #[must_use]
-    pub const fn into_inner(self) -> [u8; STATE_LEN] {
-        self.0
-    }
-
+    /// Encode 64 coefficients into the packed 72-byte state layout.
     pub(crate) fn encode(&mut self, coeffs: &[u16; N]) {
         self.0 = [0u8; STATE_LEN];
 
@@ -118,63 +118,11 @@ impl State {
     }
 }
 
-impl Default for State {
-    fn default() -> Self {
-        Self([0u8; STATE_LEN])
-    }
-}
-
-impl From<[u8; STATE_LEN]> for State {
-    fn from(bytes: [u8; STATE_LEN]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl TryFrom<&[u8]> for State {
-    type Error = core::array::TryFromSliceError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        value.try_into().map(Self)
-    }
-}
-
-/// 56-byte message block.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Block(pub [u8; BLOCK_LEN]);
-
-impl Block {
-    /// Borrow the underlying bytes.
-    #[cfg(test)]
-    pub const fn as_bytes(&self) -> &[u8; BLOCK_LEN] {
-        &self.0
-    }
-
-    /// Consume and return the inner array.
-    #[cfg(test)]
-    pub const fn into_inner(self) -> [u8; BLOCK_LEN] {
-        self.0
-    }
-}
-
-impl Default for Block {
-    fn default() -> Self {
-        Self([0u8; BLOCK_LEN])
-    }
-}
-
-impl From<[u8; BLOCK_LEN]> for Block {
-    fn from(bytes: [u8; BLOCK_LEN]) -> Self {
-        Self(bytes)
-    }
-}
-
-impl TryFrom<&[u8]> for Block {
-    type Error = core::array::TryFromSliceError;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        value.try_into().map(Self)
-    }
-}
+define_byte_newtype!(
+    /// 56-byte message block.
+    Block,
+    BLOCK_LEN
+);
 
 const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
 
@@ -182,6 +130,7 @@ const MSG_LEN: usize = STATE_LEN + BLOCK_LEN;
 pub(crate) struct Message([u8; MSG_LEN]);
 
 impl Message {
+    /// Construct a message buffer from `state || block`.
     pub(crate) fn new(state: &State, block: &Block) -> Self {
         let mut msg = [0u8; MSG_LEN];
         msg[..STATE_LEN].copy_from_slice(&state.0);
@@ -189,6 +138,7 @@ impl Message {
         Self(msg)
     }
 
+    /// Extract the 64 bits for the given column `column ∈ 0..M`.
     pub(crate) fn extract_column_bits(&self, column: usize) -> [u8; N] {
         debug_assert!(column < M, "column index out of range");
 
@@ -205,7 +155,7 @@ impl Message {
         bits
     }
 
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Compute F(x) for the requested column, returning field elements.
     pub(crate) fn transform_column(&self, column: usize) -> [FieldElement; N] {
         transform(&self.extract_column_bits(column)).map(FieldElement::from)
     }
@@ -224,6 +174,7 @@ mod tests {
     mod helpers {
         use super::*;
 
+        /// Fast modular exponentiation helper for tests.
         pub fn pow_mod(mut base: u32, mut exp: u32, modulus: u32) -> u16 {
             base %= modulus;
             let mut result: u32 = 1;
@@ -237,6 +188,7 @@ mod tests {
             result as u16
         }
 
+        /// Straightforward reference implementation of the column transform.
         pub fn naive_transform(bits: &[u8; N]) -> [u16; N] {
             let mut out = [0u16; N];
 
@@ -261,12 +213,14 @@ mod tests {
             out
         }
 
+        /// Reference encoder for comparison against the fast path.
         pub fn naive_encode(coeffs: &[u16; N]) -> State {
             let mut state = State::default();
             state.encode(coeffs);
             state
         }
 
+        /// Reference SWIFFT compression for comparison against the fast path.
         pub fn reference_compress(
             key: &Key,
             state: &State,
