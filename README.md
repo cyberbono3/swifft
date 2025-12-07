@@ -7,18 +7,29 @@ PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementat
 ## Usage
 
 ```rust
-use swifft::{Block, Key, State};
+use swifft::{Block, Key, State, BLOCK_LEN, KEY_LEN};
 
-let key = Key::default(); // coefficients are bytes mod 257
+// Keys are 1024 bytes interpreted modulo 257 (0..=256).
+let key_bytes = [0u8; KEY_LEN];
+let key = Key::from(key_bytes);
+
+// State is a 72-byte chaining value; initialize however you like.
 let mut state = State::default();
-let block = Block::default();
 
-// Inherent method on State
+// Blocks are exactly 56 bytes; you can build them from a byte array or slice.
+let block_bytes = [0u8; BLOCK_LEN];
+let block = Block::from(block_bytes);
+
+// Compress in-place, writing the new state back into `state`.
 state.compress(&key, &block);
-
-// Or via the inherent method on Key
-key.compress(&mut state, &block);
 ```
+
+## Project structure
+
+- `src/lib.rs`: crate entry, constants, and public re-exports (`Block`, `Key`, `State`).
+- `src/core.rs`: byte newtypes and the SWIFFT compression implementation.
+- `src/math.rs`: power tables, twiddle factors, and the transform used by compression.
+- `src/field_element.rs`: modular arithmetic over `F_257` used throughout the math layer.
 
 ## Invariants & notes
 
