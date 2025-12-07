@@ -1,8 +1,17 @@
-PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP)
+PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP) ![Tests](https://github.com/cyberbono3/swifft/actions/workflows/tests.yml/badge.svg)
 
 - Clean-room Rust port of the n=64, m=16, p=257 parameters.
 - Requires `std` for now (no `no_std` support).
 - Optional feature flags reserved for future optimizations: `parallel`, `simd`.
+
+## Building
+Use `cargo`, the standard Rust build tool, to build the library:
+
+```bash
+git clone https://github.com/cyberbono3/swifft.git
+cd swifft
+cargo build --release
+```
 
 ## Usage
 
