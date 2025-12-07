@@ -39,10 +39,11 @@ state.compress(&key, &block);
 - `src/state.rs`: byte newtypes and the SWIFFT compression implementation.
 - `src/math.rs`: power tables, twiddle factors, and the transform used by compression.
 - `src/field_element.rs`: modular arithmetic over `F_257` used throughout the math layer.
+- `src/test_support.rs`: naive reference helpers shared by tests to keep them DRY.
 
 ## Invariants & notes
 
 - `Key` entries are interpreted modulo 257 (range 0..=256).
 - `Block` is exactly 56 bytes; `State` is exactly 72 bytes (low bytes then packed high bits).
 - The implementation is `#![forbid(unsafe_code)]` and keeps arithmetic in `u16/u32` to avoid panics.
-- Output compatibility is tested against a slow reference model in-unit tests; add official vectors once available.
+- Output compatibility is tested against a shared naive reference model in-unit tests; add official vectors once available.
