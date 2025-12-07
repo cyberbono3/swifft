@@ -1,6 +1,6 @@
+use crate::field_element::FieldElement;
 #[cfg(test)]
 use crate::State;
-use crate::{fe, field_element::FieldElement};
 
 /// Ring dimension n.
 pub(crate) const N: usize = 64;
@@ -50,21 +50,21 @@ const fn reduce_exp(exp: u32) -> usize {
     (exp & 0x7F) as usize
 }
 
-/// Lazy twiddle matrix for the transform.
+/// Lazy twiddle matrix in `FieldElement` form to avoid per-call conversions.
 #[allow(clippy::cast_possible_truncation)] // i,k < N=64 so casts to u32 are safe
-fn twiddle() -> &'static [[u16; N]; N] {
+fn twiddle() -> &'static [[FieldElement; N]; N] {
     use std::sync::OnceLock;
 
-    static TWIDDLE: OnceLock<[[u16; N]; N]> = OnceLock::new();
+    static TWIDDLE: OnceLock<[[FieldElement; N]; N]> = OnceLock::new();
     TWIDDLE.get_or_init(|| {
-        let mut table = [[0u16; N]; N];
+        let mut table = [[FieldElement::ZERO; N]; N];
         let mut i = 0;
         while i < N {
             let factor = (2 * (i as u32)) + 1;
             let mut k = 0;
             while k < N {
                 let exponent = factor * (k as u32);
-                table[i][k] = pow_omega(exponent);
+                table[i][k] = pow_table_get(exponent);
                 k += 1;
             }
             i += 1;
@@ -87,7 +87,7 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
         for (bit, &omega_pow) in bits.iter().zip(twiddle_row.iter()) {
             debug_assert!(*bit <= 1, "transform bits must be 0/1");
             if *bit == 1 {
-                acc += fe!(omega_pow);
+                acc += omega_pow;
             }
         }
 
