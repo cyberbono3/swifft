@@ -20,5 +20,7 @@ pub const BLOCK_LEN: usize = 56; // 72 + 56 = 128 bytes = 1024 bits
 pub mod field_element;
 pub(crate) mod math;
 pub mod state;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 pub use crate::state::{Block, Key, State};

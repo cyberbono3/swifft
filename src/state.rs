@@ -166,52 +166,15 @@ mod tests {
     use super::Message;
     use crate::{
         field_element::FieldElement,
-        math::{self, M, N, OMEGA},
+        math::{self, M, N},
+        test_support::naive_transform,
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
     use core::convert::TryFrom;
 
     mod helpers {
         use super::*;
-
-        /// Fast modular exponentiation helper for tests.
-        pub fn pow_mod(mut base: u32, mut exp: u32, modulus: u32) -> u16 {
-            base %= modulus;
-            let mut result: u32 = 1;
-            while exp > 0 {
-                if exp & 1 == 1 {
-                    result = (result * base) % modulus;
-                }
-                base = (base * base) % modulus;
-                exp >>= 1;
-            }
-            result as u16
-        }
-
-        /// Straightforward reference implementation of the column transform.
-        pub fn naive_transform(bits: &[u8; N]) -> [u16; N] {
-            let mut out = [0u16; N];
-
-            for (i, out_i) in out.iter_mut().enumerate() {
-                let mut acc = 0u32;
-                let factor = 2 * (i as u32) + 1;
-
-                for (k, &bit) in bits.iter().enumerate() {
-                    if bit & 1 == 0 {
-                        continue;
-                    }
-                    let exponent = factor * (k as u32);
-                    let w =
-                        pow_mod(OMEGA as u32, exponent, FieldElement::P as u32)
-                            as u32;
-                    acc = (acc + w) % (FieldElement::P as u32);
-                }
-
-                *out_i = acc as u16;
-            }
-
-            out
-        }
+        use crate::test_support::naive_transform;
 
         /// Reference encoder for comparison against the fast path.
         pub fn naive_encode(coeffs: &[u16; N]) -> State {
@@ -262,7 +225,7 @@ mod tests {
         }
 
         let fast = math::transform(&bits);
-        let expected = helpers::naive_transform(&bits);
+        let expected = naive_transform(&bits);
         assert_eq!(fast, expected);
     }
 
@@ -462,7 +425,7 @@ mod tests {
         let msg = Message::new(&state, &block);
 
         let bits = msg.extract_column_bits(9);
-        let expected = helpers::naive_transform(&bits);
+        let expected = naive_transform(&bits);
         let via_method = msg.transform_column(9).map(FieldElement::value);
 
         assert_eq!(via_method, expected);
@@ -484,7 +447,7 @@ mod tests {
         state_bytes[8..16].fill(0xFF);
         let msg_full = Message::new(&State::from(state_bytes), &block);
         let bits_full = msg_full.extract_column_bits(1);
-        let expected_full = helpers::naive_transform(&bits_full);
+        let expected_full = naive_transform(&bits_full);
         let via_method_full =
             msg_full.transform_column(1).map(FieldElement::value);
         assert_eq!(via_method_full, expected_full);
