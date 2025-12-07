@@ -166,7 +166,7 @@ mod tests {
     use super::Message;
     use crate::{
         field_element::FieldElement,
-        math::{self, pow_omega, M, N, OMEGA},
+        math::{self, M, N, OMEGA},
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
     use core::convert::TryFrom;
@@ -252,14 +252,6 @@ mod tests {
 
             naive_encode(&z)
         }
-    }
-
-    #[test]
-    fn pow_omega_respects_order() {
-        assert_eq!(pow_omega(0), 1);
-        assert_eq!(pow_omega(1), OMEGA);
-        assert_eq!(pow_omega(128), 1);
-        assert_eq!(pow_omega(129), OMEGA);
     }
 
     #[test]

@@ -39,7 +39,6 @@ pub(crate) fn pow_omega(exp: u32) -> u16 {
 }
 
 #[inline]
-#[allow(dead_code)] // paired with pow_omega
 fn exp_index(exp: u32) -> usize {
     reduce_exp(exp)
 }
@@ -119,6 +118,46 @@ mod tests {
         for exp in 0..256u32 {
             let expected = pow_mod(OMEGA as u32, exp, FieldElement::P as u32);
             assert_eq!(pow_omega(exp), expected, "exp {}", exp);
+        }
+    }
+
+    #[test]
+    fn pow_omega_respects_order() {
+        assert_eq!(pow_omega(0), 1);
+        assert_eq!(pow_omega(1), OMEGA);
+        assert_eq!(pow_omega(128), 1);
+        assert_eq!(pow_omega(129), OMEGA);
+    }
+
+    #[test]
+    fn pow_table_contains_expected_powers() {
+        let table = pow_table();
+        assert_eq!(table.len(), 128);
+        assert_eq!(table[0], FieldElement::ONE);
+
+        let omega = FieldElement::from(OMEGA);
+        for idx in 1..table.len() {
+            assert_eq!(table[idx], table[idx - 1] * omega, "index {}", idx);
+        }
+
+        assert_eq!(table[0], table[127] * omega);
+    }
+
+    #[test]
+    fn pow_table_get_wraps_exponents() {
+        let table = pow_table();
+        let cases = [
+            (0u32, 0usize),
+            (1, 1),
+            (127, 127),
+            (128, 0),
+            (129, 1),
+            (255, 127),
+            (256, 0),
+        ];
+
+        for (exp, idx) in cases {
+            assert_eq!(pow_table_get(exp), table[idx], "exp {}", exp);
         }
     }
 
