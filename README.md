@@ -1,8 +1,11 @@
-PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP) ![Tests](https://github.com/cyberbono3/swifft/actions/workflows/tests.yml/badge.svg)
+PoC [SWIFFT](https://cseweb.ucsd.edu/~vlyubash/papers/swifftfse.pdf) implementation (WIP) !
+[Tests](https://github.com/cyberbono3/swifft/actions/workflows/tests.yml/badge.svg)
 
 - Clean-room Rust port of the n=64, m=16, p=257 parameters.
 - Requires `std` for now (no `no_std` support).
 - Optional feature flags reserved for future optimizations: `parallel`, `simd`.
+
+## Disclamer: Do not use it in production. This is the experimental implementation.
 
 ## Building
 Use `cargo`, the standard Rust build tool, to build the library:
@@ -14,7 +17,6 @@ cargo build --release
 ```
 
 ## Usage
-
 ```rust
 use swifft::{Block, Key, State, BLOCK_LEN, KEY_LEN};
 
