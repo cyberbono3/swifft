@@ -27,7 +27,7 @@ state.compress(&key, &block);
 ## Project structure
 
 - `src/lib.rs`: crate entry, constants, and public re-exports (`Block`, `Key`, `State`).
-- `src/core.rs`: byte newtypes and the SWIFFT compression implementation.
+- `src/state.rs`: byte newtypes and the SWIFFT compression implementation.
 - `src/math.rs`: power tables, twiddle factors, and the transform used by compression.
 - `src/field_element.rs`: modular arithmetic over `F_257` used throughout the math layer.
 
