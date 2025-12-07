@@ -1,7 +1,7 @@
-use crate::{fe, State, STATE_LEN};
-use core::convert::TryFrom;
+use crate::field_element::FieldElement;
+#[cfg(test)]
+use crate::State;
 
-pub use crate::field_element::P;
 /// Ring dimension n.
 pub(crate) const N: usize = 64;
 /// Number of columns m.
@@ -9,101 +9,67 @@ pub(crate) const M: usize = 16;
 /// A 128th root of unity modulo 257 (order exactly 128).
 pub(crate) const OMEGA: u16 = 42;
 
-const POW_TABLE: [u16; 128] = precompute_powers();
-const TWIDDLE: [[u16; N]; N] = precompute_twiddle();
+/// Lazy runtime table for ω^k.
+fn pow_table() -> &'static [FieldElement; 128] {
+    use std::sync::OnceLock;
 
-#[allow(clippy::cast_possible_truncation)] // indices are bounded by construction
-const fn precompute_powers() -> [u16; 128] {
-    let mut table = [1u16; 128];
-    let mut i = 1;
-    while i < 128 {
-        table[i] = fe_mul_const_int(table[i - 1], OMEGA);
-        i += 1;
-    }
-    table
-}
-
-#[allow(clippy::cast_possible_truncation)] // i,k are always < 64
-const fn precompute_twiddle() -> [[u16; N]; N] {
-    let mut table = [[0u16; N]; N];
-    let mut i = 0;
-    while i < N {
-        let factor = (2 * (i as u32)) + 1;
-        let mut k = 0;
-        while k < N {
-            let exponent = factor * (k as u32);
-            table[i][k] = pow_omega_const(exponent);
-            k += 1;
+    static TABLE: OnceLock<[FieldElement; 128]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut table = [FieldElement::ONE; 128];
+        let omega = FieldElement::from(OMEGA);
+        let mut i = 1;
+        while i < 128 {
+            table[i] = table[i - 1] * omega;
+            i += 1;
         }
-        i += 1;
-    }
-    table
-}
-
-#[allow(clippy::cast_possible_truncation)] // bounded by P = 257
-const fn fe_mul_const_int(a: u16, b: u16) -> u16 {
-    ((a as u32 * b as u32) % (P as u32)) as u16
+        table
+    })
 }
 
 #[inline]
-pub(crate) fn fe_add(a: u16, b: u16) -> u16 {
-    if cfg!(feature = "ark-ntt") {
-        #[cfg(feature = "ark-ntt")]
-        {
-            let sum = coeff_to_field(a) + coeff_to_field(b);
-            return field_to_coeff(&sum);
-        }
-        #[cfg(not(feature = "ark-ntt"))]
-        unreachable!();
-    }
-
-    (fe!(a) + fe!(b)).value()
-}
-
-#[inline]
-#[allow(dead_code)]
-pub(crate) fn fe_mul(a: u16, b: u16) -> u16 {
-    if cfg!(feature = "ark-ntt") {
-        #[cfg(feature = "ark-ntt")]
-        {
-            let prod = coeff_to_field(a) * coeff_to_field(b);
-            return field_to_coeff(&prod);
-        }
-        #[cfg(not(feature = "ark-ntt"))]
-        unreachable!();
-    }
-
-    (fe!(a) * fe!(b)).value()
+fn pow_table_get(exp: u32) -> FieldElement {
+    pow_table()[exp_index(exp)]
 }
 
 /// Compute OMEGA^exp mod 257 using the precomputed table.
 #[inline]
 #[allow(dead_code)] // used in tests and for debugging
 pub(crate) fn pow_omega(exp: u32) -> u16 {
-    POW_TABLE[exp_index(exp)]
+    pow_table_get(exp).value()
 }
 
 #[inline]
-#[allow(dead_code)] // paired with pow_omega
 fn exp_index(exp: u32) -> usize {
-    usize::try_from(exp & 0x7F).expect("exp reduced to <128")
+    reduce_exp(exp)
 }
 
-/// Compute OMEGA^exp mod 257 (const-friendly for build-time tables).
-const fn pow_omega_const(exp: u32) -> u16 {
-    let mut e = exp & 0x7F;
-    let mut result: u16 = 1;
-    let mut base: u16 = OMEGA;
+#[inline]
+const fn reduce_exp(exp: u32) -> usize {
+    // Reduce modulo 128 (order of omega) before casting to usize.
+    (exp & 0x7F) as usize
+}
 
-    while e > 0 {
-        if (e & 1) != 0 {
-            result = fe_mul_const_int(result, base);
+/// Lazy twiddle matrix in `FieldElement` form to avoid per-call conversions.
+#[allow(clippy::cast_possible_truncation)] // i,k < N=64 so casts to u32 are safe
+fn twiddle() -> &'static [[FieldElement; N]; N] {
+    use std::sync::OnceLock;
+
+    static TWIDDLE: OnceLock<[[FieldElement; N]; N]> = OnceLock::new();
+    TWIDDLE.get_or_init(|| {
+        let mut table = [[FieldElement::ZERO; N]; N];
+        let mut i = 0;
+        while i < N {
+            let factor = (2 * (i as u32)) + 1;
+            let mut k = 0;
+            while k < N {
+                let exponent = factor * (k as u32);
+                table[i][k] = pow_table_get(exponent);
+                k += 1;
+            }
+            i += 1;
         }
-        base = fe_mul_const_int(base, base);
-        e >>= 1;
-    }
-
-    result
+        table
+    })
 }
 
 /// Compute F(x) for a 64-bit vector x ∈ {0,1}^64 using a precomputed twiddle matrix.
@@ -114,98 +80,104 @@ pub(crate) fn transform(bits: &[u8; N]) -> [u16; N] {
     let mut out = [0u16; N];
 
     for (i, out_i) in out.iter_mut().enumerate() {
-        let mut acc: u16 = 0;
-        let twiddle_row = &TWIDDLE[i];
+        let mut acc = FieldElement::ZERO;
+        let twiddle_row = &twiddle()[i];
 
         for (bit, &omega_pow) in bits.iter().zip(twiddle_row.iter()) {
             debug_assert!(*bit <= 1, "transform bits must be 0/1");
             if *bit == 1 {
-                acc = fe_add(acc, omega_pow);
+                acc += omega_pow;
             }
         }
 
-        *out_i = acc;
+        *out_i = acc.value();
     }
 
     out
 }
 
-/// Encode 64 coefficients in `Z_257` into the 72-byte digest format.
-///
-/// Layout:
-///   bytes[0..64):  low 8 bits of each coefficient `z_i`.
-///   bytes[64..72): high bit (bit 8) of each `z_i`, packed LSB-first.
-pub(crate) fn encode_state(coeffs: &[u16; N]) -> State {
-    let mut bytes = [0u8; STATE_LEN];
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::{naive_transform, pow_mod};
 
-    // Low 8 bits.
-    for (i, coeff) in coeffs.iter().enumerate() {
-        debug_assert!(*coeff <= 256, "coefficient must be in 0..=256");
-        bytes[i] = (coeff & 0xFF) as u8;
+    #[test]
+    fn pow_omega_matches_naive_pow() {
+        for exp in 0..256u32 {
+            let expected = pow_mod(OMEGA as u32, exp, FieldElement::P as u32);
+            assert_eq!(pow_omega(exp), expected, "exp {}", exp);
+        }
     }
 
-    // High bit (bit 8) packed into the last 8 bytes.
-    for (i, coeff) in coeffs.iter().enumerate() {
-        let hi = (coeff >> 8) & 1;
-        let byte_index = 64 + (i / 8); // 64..71
-        let bit_in_byte = i % 8;
-
-        bytes[byte_index] |= (hi as u8) << bit_in_byte;
+    #[test]
+    fn pow_omega_respects_order() {
+        assert_eq!(pow_omega(0), 1);
+        assert_eq!(pow_omega(1), OMEGA);
+        assert_eq!(pow_omega(128), 1);
+        assert_eq!(pow_omega(129), OMEGA);
     }
 
-    State(bytes)
+    #[test]
+    fn pow_table_contains_expected_powers() {
+        let table = pow_table();
+        assert_eq!(table.len(), 128);
+        assert_eq!(table[0], FieldElement::ONE);
+
+        let omega = FieldElement::from(OMEGA);
+        for idx in 1..table.len() {
+            assert_eq!(table[idx], table[idx - 1] * omega, "index {}", idx);
+        }
+
+        assert_eq!(table[0], table[127] * omega);
+    }
+
+    #[test]
+    fn pow_table_get_wraps_exponents() {
+        let table = pow_table();
+        let cases = [
+            (0u32, 0usize),
+            (1, 1),
+            (127, 127),
+            (128, 0),
+            (129, 1),
+            (255, 127),
+            (256, 0),
+        ];
+
+        for (exp, idx) in cases {
+            assert_eq!(pow_table_get(exp), table[idx], "exp {}", exp);
+        }
+    }
+
+    #[test]
+    fn transform_matches_naive() {
+        let mut bits = [0u8; N];
+        for idx in [0usize, 1, 5, 13, 21, 63] {
+            bits[idx] = 1;
+        }
+
+        let fast = transform(&bits);
+        let expected = naive_transform(&bits);
+        assert_eq!(fast, expected);
+    }
+
+    #[test]
+    fn encode_state_packs_high_bits() {
+        let mut coeffs = [0u16; N];
+        coeffs[0] = 256;
+        coeffs[7] = 256;
+        coeffs[8] = 256;
+        coeffs[10] = 255;
+        coeffs[63] = 256;
+
+        let mut encoded = State::default();
+        encoded.encode(&coeffs);
+
+        assert_eq!(encoded.0[0], 0);
+        assert_eq!(encoded.0[10], 255);
+        assert_eq!(encoded.0[64], 0b1000_0001);
+        assert_eq!(encoded.0[65], 0b0000_0001);
+        assert_eq!(encoded.0[71], 0b1000_0000);
+        assert_eq!(&encoded.0[66..71], &[0, 0, 0, 0, 0]);
+    }
 }
-
-// Optional arkworks-backed FFT/NTT helpers for benchmarking and experimentation.
-// The SWIFFT core does not rely on these, but they provide a convenient,
-// well-tested NTT for F_257 when the `ark-ntt` feature is enabled.
-#[cfg(feature = "ark-ntt")]
-mod ark_fft {
-    use ark_ff::{fields::Fp64, MontBackend, MontConfig, PrimeField};
-    use ark_poly::{EvaluationDomain, GeneralEvaluationDomain};
-
-    #[derive(MontConfig)]
-    #[modulus = "257"]
-    #[generator = "3"] // generator of order 256 in F_257
-    pub struct F257Config;
-
-    pub type F257 = Fp64<MontBackend<F257Config, 1>>;
-
-    /// Two-adicity for F_257 (257 - 1 = 2^8).
-    pub const TWO_ADICITY: u64 = 8;
-
-    /// In-place forward NTT using arkworks domains (requires power-of-two len ≤ 256).
-    pub fn ntt_in_place(values: &mut [F257]) {
-        let domain = GeneralEvaluationDomain::<F257>::new(values.len())
-            .expect("NTT length must be compatible with two-adicity 8");
-        domain.fft(values);
-    }
-
-    /// In-place inverse NTT using arkworks domains (requires power-of-two len ≤ 256).
-    pub fn intt_in_place(values: &mut [F257]) {
-        let domain = GeneralEvaluationDomain::<F257>::new(values.len())
-            .expect("NTT length must be compatible with two-adicity 8");
-        domain.ifft(values);
-    }
-
-    /// Convert a coefficient (0..=256) into the F_257 element type.
-    #[inline]
-    pub fn coeff_to_field(c: u16) -> F257 {
-        F257::from(c as u64)
-    }
-
-    /// Convert an F_257 element back into a coefficient (0..=256).
-    #[inline]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
-    pub fn field_to_coeff(f: &F257) -> u16 {
-        // into_bigint is canonical; still mask to be safe.
-        let limbs = f.into_bigint().0;
-        (limbs[0] % (super::P as u64)) as u16
-    }
-}
-
-#[cfg(feature = "ark-ntt")]
-pub use ark_fft::{
-    coeff_to_field, field_to_coeff, intt_in_place, ntt_in_place, F257Config,
-    F257, TWO_ADICITY,
-};
