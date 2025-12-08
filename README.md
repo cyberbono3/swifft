@@ -7,7 +7,9 @@
 
 - Clean-room Rust port of the n=64, m=16, p=257 parameters.
 - Requires `std` for now (no `no_std` support).
-- Optional feature flags reserved for future optimizations: `parallel`, `simd`.
+- Optional feature flags:
+  - `parallel`: enable Rayon-backed parallel column transforms and reductions.
+  - `simd`: reserved for future work.
 
 ## Building
 Use `cargo`, the standard Rust build tool, to build the library:
@@ -36,6 +38,17 @@ let block = Block::from(block_bytes);
 // Compress in-place, writing the new state back into `state`.
 state.compress(&key, &block);
 ```
+
+There is a runnable version of this snippet in `examples/naive.rs`:
+
+```bash
+cargo run --example naive
+```
+It prints the resulting 72-byte SWIFFT digest in hex.
+
+## Features
+
+- Run with `--features parallel` to enable multi-core compression (for example, `cargo run --example naive --features parallel`).
 
 ## Project structure
 
