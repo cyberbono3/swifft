@@ -218,6 +218,10 @@ type Backend = ScalarBackend;
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "parallel")]
+    use super::ParallelBackend;
+    #[cfg(not(feature = "parallel"))]
+    use super::ScalarBackend;
     use super::{Backend, CompressionBackend, Message};
     use crate::{
         fe,
@@ -374,6 +378,44 @@ mod tests {
         let expected = helpers::reduce_columns_reference(&key, &columns);
         let actual = Backend::reduce_columns(&key, &columns);
         assert_eq!(actual, expected);
+    }
+
+    #[cfg(not(feature = "parallel"))]
+    #[test]
+    fn scalar_backend_transform_and_reduce_match_reference() {
+        let key = Key(patterned_bytes::<KEY_LEN>(4, 9));
+        let state = State(patterned_bytes::<STATE_LEN>(6, 2));
+        let block = Block(patterned_bytes::<BLOCK_LEN>(3, 7));
+
+        let msg = Message::new(&state, &block);
+        let columns = ScalarBackend::transform_columns(&msg);
+
+        for (j, col) in columns.iter().enumerate() {
+            assert_eq!(*col, msg.transform_column(j));
+        }
+
+        let reduced = ScalarBackend::reduce_columns(&key, &columns);
+        let expected = helpers::reduce_columns_reference(&key, &columns);
+        assert_eq!(reduced, expected);
+    }
+
+    #[cfg(feature = "parallel")]
+    #[test]
+    fn parallel_backend_transform_and_reduce_match_reference() {
+        let key = Key(patterned_bytes::<KEY_LEN>(4, 9));
+        let state = State(patterned_bytes::<STATE_LEN>(6, 2));
+        let block = Block(patterned_bytes::<BLOCK_LEN>(3, 7));
+
+        let msg = Message::new(&state, &block);
+        let columns = ParallelBackend::transform_columns(&msg);
+
+        for (j, col) in columns.iter().enumerate() {
+            assert_eq!(*col, msg.transform_column(j));
+        }
+
+        let reduced = ParallelBackend::reduce_columns(&key, &columns);
+        let expected = helpers::reduce_columns_reference(&key, &columns);
+        assert_eq!(reduced, expected);
     }
 
     #[test]
