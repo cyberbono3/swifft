@@ -18,7 +18,7 @@ cd swifft
 cargo build --release
 ```
 
-## Usage
+## Usage (TODO test it)
 ```rust
 use swifft::{Block, Key, State, BLOCK_LEN, KEY_LEN};
 
@@ -35,6 +35,16 @@ let block = Block::from(block_bytes);
 
 // Compress in-place, writing the new state back into `state`.
 state.compress(&key, &block);
+```
+## Example
+There is a runnable version of this snippet in `examples/naive.rs`:
+
+```bash
+cargo run --example naive
+```
+It prints the resulting 72-byte SWIFFT digest in hex.
+```
+SWIFFT digest (hex): b4064d836d08c690362a48021db5960912bbf24d1e5f2239b19aebb459bbc974e0355afa89bc40ae93ed0064886c33bd3c40d36f3d6bb3eb9dfddb37c39f4d2b0000000000040000
 ```
 
 ## Project structure
