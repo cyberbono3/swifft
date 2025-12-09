@@ -1,11 +1,9 @@
 use crate::{
-    fe,
+    backend::{Backend, CompressionBackend},
     field_element::FieldElement,
     math::{transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 macro_rules! define_byte_newtype {
     ($(#[$meta:meta])* $name:ident, $len:expr) => {
@@ -93,53 +91,8 @@ impl State {
         // 1. Build the 128-byte message buffer.
         let msg = Message::new(self, block);
 
-        // 2–3. Compute y[j][i] = F(x_j)_i.
-        //
-        // Here:
-        //   - j = column index   (0..15)
-        //   - i = output index   (0..63)
-        #[cfg(feature = "parallel")]
-        let y: [[FieldElement; N]; M] = {
-            let mut cols = [[FieldElement::ZERO; N]; M];
-            cols.par_iter_mut()
-                .enumerate()
-                .for_each(|(j, slot)| *slot = msg.transform_column(j));
-            cols
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let y: [[FieldElement; N]; M] =
-            core::array::from_fn(|j| msg.transform_column(j));
-
-        // 4. Linear combination across columns: z[i] = Σ_j a_{i,j} * y[j][i] mod 257.
-        //
-        // Key layout:
-        //   key.0[j * N + i]  ≙  a_{i,j}
-        #[cfg(feature = "parallel")]
-        let z: [FieldElement; N] = {
-            let mut out = [FieldElement::ZERO; N];
-            out.par_iter_mut().enumerate().for_each(|(i, z_i)| {
-                let acc = y.iter().enumerate().fold(
-                    FieldElement::ZERO,
-                    |acc, (j, y_col)| {
-                        let a_ij = fe!(u16::from(key.0[j * N + i]));
-                        acc + a_ij * y_col[i]
-                    },
-                );
-                *z_i = acc;
-            });
-            out
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let z: [FieldElement; N] = core::array::from_fn(|i| {
-            y.iter()
-                .enumerate()
-                .fold(FieldElement::ZERO, |acc, (j, y_col)| {
-                    let a_ij = fe!(u16::from(key.0[j * N + i]));
-                    acc + a_ij * y_col[i]
-                })
-        });
+        let columns = Backend::transform_columns(&msg);
+        let z = Backend::reduce_columns(key, &columns);
 
         // 5. Encode back into the 72-byte state buffer.
         let z_u16: [u16; N] = z.map(FieldElement::value);
@@ -196,6 +149,7 @@ mod tests {
     use crate::{
         field_element::FieldElement,
         math::{self, M, N},
+        pattern::patterned_bytes,
         test_support::naive_transform,
         Block, Key, State, BLOCK_LEN, KEY_LEN, STATE_LEN,
     };
@@ -308,20 +262,9 @@ mod tests {
 
     #[test]
     fn compress_matches_reference_implementation() {
-        let mut key = Key([0u8; KEY_LEN]);
-        for (i, byte) in key.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(3).wrapping_add(5);
-        }
-
-        let mut state_input = State([0u8; STATE_LEN]);
-        for (i, byte) in state_input.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(7).wrapping_add(1);
-        }
-
-        let mut block = Block([0u8; BLOCK_LEN]);
-        for (i, byte) in block.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(13).wrapping_add(3);
-        }
+        let key = Key(patterned_bytes::<KEY_LEN>(3, 5));
+        let state_input = State(patterned_bytes::<STATE_LEN>(7, 1));
+        let block = Block(patterned_bytes::<BLOCK_LEN>(13, 3));
 
         let mut fast = state_input.clone();
         fast.compress(&key, &block);
@@ -332,22 +275,12 @@ mod tests {
 
     #[test]
     fn state_method_matches_free_compress() {
-        let mut key = Key([0u8; KEY_LEN]);
-        for (i, byte) in key.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(11).wrapping_add(7);
-        }
-
-        let mut state_a = State::default();
-        for (i, byte) in state_a.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(5).wrapping_add(9);
-        }
+        let key = Key(patterned_bytes::<KEY_LEN>(11, 7));
+        let mut state_a = State(patterned_bytes::<STATE_LEN>(5, 9));
 
         let mut state_b = state_a.clone();
 
-        let mut block = Block::default();
-        for (i, byte) in block.0.iter_mut().enumerate() {
-            *byte = (i as u8).wrapping_mul(17).wrapping_add(3);
-        }
+        let block = Block(patterned_bytes::<BLOCK_LEN>(17, 3));
 
         state_a.compress(&key, &block);
         state_b.compress(&key, &block);
@@ -357,15 +290,8 @@ mod tests {
 
     #[test]
     fn assemble_message_concatenates_state_and_block() {
-        let mut state_bytes = [0u8; STATE_LEN];
-        let mut block_bytes = [0u8; BLOCK_LEN];
-
-        for (i, b) in state_bytes.iter_mut().enumerate() {
-            *b = i as u8;
-        }
-        for (i, b) in block_bytes.iter_mut().enumerate() {
-            *b = (i as u8).wrapping_add(100);
-        }
+        let state_bytes = patterned_bytes::<STATE_LEN>(1, 0);
+        let block_bytes = patterned_bytes::<BLOCK_LEN>(1, 100);
 
         let state = State::from(state_bytes);
         let block = Block::from(block_bytes);
@@ -377,15 +303,8 @@ mod tests {
 
     #[test]
     fn message_new_copies_state_and_block() {
-        let mut state = State([0u8; STATE_LEN]);
-        let mut block = Block([0u8; BLOCK_LEN]);
-
-        for (i, b) in state.0.iter_mut().enumerate() {
-            *b = (i as u8).wrapping_mul(2);
-        }
-        for (i, b) in block.0.iter_mut().enumerate() {
-            *b = (i as u8).wrapping_mul(3).wrapping_add(1);
-        }
+        let state = State(patterned_bytes::<STATE_LEN>(2, 0));
+        let block = Block(patterned_bytes::<BLOCK_LEN>(3, 1));
 
         let msg = Message::new(&state, &block);
         assert_eq!(&msg.0[..STATE_LEN], state.0.as_slice());
