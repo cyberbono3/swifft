@@ -4,6 +4,8 @@ use crate::{
     math::{transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 macro_rules! define_byte_newtype {
     ($(#[$meta:meta])* $name:ident, $len:expr) => {
@@ -96,6 +98,16 @@ impl State {
         // Here:
         //   - j = column index   (0..15)
         //   - i = output index   (0..63)
+        #[cfg(feature = "parallel")]
+        let y: [[FieldElement; N]; M] = {
+            let mut cols = [[FieldElement::ZERO; N]; M];
+            cols.par_iter_mut()
+                .enumerate()
+                .for_each(|(j, slot)| *slot = msg.transform_column(j));
+            cols
+        };
+
+        #[cfg(not(feature = "parallel"))]
         let y: [[FieldElement; N]; M] =
             core::array::from_fn(|j| msg.transform_column(j));
 
@@ -103,6 +115,23 @@ impl State {
         //
         // Key layout:
         //   key.0[j * N + i]  ≙  a_{i,j}
+        #[cfg(feature = "parallel")]
+        let z: [FieldElement; N] = {
+            let mut out = [FieldElement::ZERO; N];
+            out.par_iter_mut().enumerate().for_each(|(i, z_i)| {
+                let acc = y.iter().enumerate().fold(
+                    FieldElement::ZERO,
+                    |acc, (j, y_col)| {
+                        let a_ij = fe!(u16::from(key.0[j * N + i]));
+                        acc + a_ij * y_col[i]
+                    },
+                );
+                *z_i = acc;
+            });
+            out
+        };
+
+        #[cfg(not(feature = "parallel"))]
         let z: [FieldElement; N] = core::array::from_fn(|i| {
             y.iter()
                 .enumerate()

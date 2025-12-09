@@ -12,11 +12,12 @@ categories = ["cryptography"]
 
 [features]
 default = []
-# Reserved feature flags for future optimizations/parallelism.
-parallel = []
+# Optional feature flags for optimizations/parallelism.
+parallel = ["dep:rayon"]
 simd = []
 
 [dependencies]
+rayon = { version = "1", optional = true }
 
 [dev-dependencies]
 proptest = "1"
