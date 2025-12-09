@@ -10,6 +10,7 @@
 - Optional feature flags:
   - `parallel`: enable Rayon-backed parallel column transforms and reductions.
   - `simd`: reserved for future work.
+  - `bench`: reserved (benchmarks run without extra feature flags).
 
 ## Building
 Use `cargo`, the standard Rust build tool, to build the library:
@@ -21,6 +22,15 @@ cargo build --release
 ```
 
 ## Usage (TODO test it)
+
+Add the crate to your `Cargo.toml` (enable the `parallel` feature only if you want Rayon-backed parallelism):
+
+```toml
+[dependencies]
+swifft = { git = "https://github.com/cyberbono3/swifft" }
+```
+
+Then import the types:
 ```rust
 use swifft::{Block, Key, State, BLOCK_LEN, KEY_LEN};
 
@@ -59,6 +69,18 @@ It prints the resulting 72-byte SWIFFT digest in hex.
 ## Features
 
 - Run with `--features parallel` to enable multi-core compression (for example, `cargo run --example naive --features parallel`).
+
+## Benchmarks
+
+Criterion benchmarks live in `benches/compress.rs`.
+
+- Build without running: `CARGO_HUSKY_SKIP=1 cargo bench --no-run`
+- Run (scalar backend): `CARGO_HUSKY_SKIP=1 cargo bench`
+- Run with parallel backend: `CARGO_HUSKY_SKIP=1 cargo bench --features parallel`
+- To avoid husky hook errors, set `CARGO_HUSKY_SKIP=1` as above.
+- Recent results (Apple Silicon laptop, local run for reference):
+  - Scalar: `compress_single_block` ≈ 34.8 µs; `compress_batch/16` ≈ 702 µs.
+  - Parallel feature: `compress_single_block` ≈ 64.1 µs; `compress_batch/16` ≈ 1.06 ms (threading overhead dominates at this size).
 
 ## Project structure
 
