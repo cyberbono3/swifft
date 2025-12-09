@@ -17,6 +17,7 @@ pub const KEY_LEN: usize = 1024; // 16 × 64 coefficients
 pub const STATE_LEN: usize = 72; // 64 low bytes + 8 high-bit bytes
 pub const BLOCK_LEN: usize = 56; // 72 + 56 = 128 bytes = 1024 bits
 
+pub(crate) mod backend;
 pub mod field_element;
 pub(crate) mod math;
 pub mod pattern;

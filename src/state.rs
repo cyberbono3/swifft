@@ -1,11 +1,9 @@
 use crate::{
-    fe,
+    backend::{Backend, CompressionBackend},
     field_element::FieldElement,
     math::{transform, M, N},
     BLOCK_LEN, KEY_LEN, STATE_LEN,
 };
-#[cfg(feature = "parallel")]
-use rayon::prelude::*;
 
 macro_rules! define_byte_newtype {
     ($(#[$meta:meta])* $name:ident, $len:expr) => {
@@ -145,86 +143,10 @@ impl Message {
     }
 }
 
-trait CompressionBackend {
-    fn transform_columns(msg: &Message) -> [[FieldElement; N]; M];
-    fn reduce_columns(
-        key: &Key,
-        columns: &[[FieldElement; N]; M],
-    ) -> [FieldElement; N];
-}
-
-#[cfg(feature = "parallel")]
-struct ParallelBackend;
-
-#[cfg(feature = "parallel")]
-impl CompressionBackend for ParallelBackend {
-    fn transform_columns(msg: &Message) -> [[FieldElement; N]; M] {
-        let mut cols = [[FieldElement::ZERO; N]; M];
-        cols.par_iter_mut()
-            .enumerate()
-            .for_each(|(j, slot)| *slot = msg.transform_column(j));
-        cols
-    }
-
-    fn reduce_columns(
-        key: &Key,
-        columns: &[[FieldElement; N]; M],
-    ) -> [FieldElement; N] {
-        let mut out = [FieldElement::ZERO; N];
-        out.par_iter_mut().enumerate().for_each(|(i, z_i)| {
-            let acc = columns.iter().enumerate().fold(
-                FieldElement::ZERO,
-                |acc, (j, y_col)| {
-                    let a_ij = fe!(u16::from(key.0[j * N + i]));
-                    acc + a_ij * y_col[i]
-                },
-            );
-            *z_i = acc;
-        });
-        out
-    }
-}
-
-#[cfg(not(feature = "parallel"))]
-struct ScalarBackend;
-
-#[cfg(not(feature = "parallel"))]
-impl CompressionBackend for ScalarBackend {
-    fn transform_columns(msg: &Message) -> [[FieldElement; N]; M] {
-        core::array::from_fn(|j| msg.transform_column(j))
-    }
-
-    fn reduce_columns(
-        key: &Key,
-        columns: &[[FieldElement; N]; M],
-    ) -> [FieldElement; N] {
-        core::array::from_fn(|i| {
-            columns.iter().enumerate().fold(
-                FieldElement::ZERO,
-                |acc, (j, y_col)| {
-                    let a_ij = fe!(u16::from(key.0[j * N + i]));
-                    acc + a_ij * y_col[i]
-                },
-            )
-        })
-    }
-}
-
-#[cfg(feature = "parallel")]
-type Backend = ParallelBackend;
-
-#[cfg(not(feature = "parallel"))]
-type Backend = ScalarBackend;
-
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "parallel")]
-    use super::ParallelBackend;
-    #[cfg(not(feature = "parallel"))]
-    use super::ScalarBackend;
-    use super::{Backend, CompressionBackend, Message};
+    use super::Message;
     use crate::{
-        fe,
         field_element::FieldElement,
         math::{self, M, N},
         pattern::patterned_bytes,
@@ -275,21 +197,6 @@ mod tests {
             }
 
             naive_encode(&z)
-        }
-
-        pub fn reduce_columns_reference(
-            key: &Key,
-            columns: &[[FieldElement; N]; M],
-        ) -> [FieldElement; N] {
-            core::array::from_fn(|i| {
-                columns.iter().enumerate().fold(
-                    FieldElement::ZERO,
-                    |acc, (j, y_col)| {
-                        let a_ij = fe!(u16::from(key.0[j * N + i]));
-                        acc + a_ij * y_col[i]
-                    },
-                )
-            })
         }
     }
 
@@ -364,58 +271,6 @@ mod tests {
 
         let expected = helpers::reference_compress(&key, &state_input, &block);
         assert_eq!(fast, expected);
-    }
-
-    #[test]
-    fn backend_reduce_matches_reference() {
-        let key = Key(patterned_bytes::<KEY_LEN>(9, 4));
-        let state = State(patterned_bytes::<STATE_LEN>(2, 1));
-        let block = Block(patterned_bytes::<BLOCK_LEN>(7, 3));
-
-        let msg = Message::new(&state, &block);
-        let columns = Backend::transform_columns(&msg);
-
-        let expected = helpers::reduce_columns_reference(&key, &columns);
-        let actual = Backend::reduce_columns(&key, &columns);
-        assert_eq!(actual, expected);
-    }
-
-    #[cfg(not(feature = "parallel"))]
-    #[test]
-    fn scalar_backend_transform_and_reduce_match_reference() {
-        let key = Key(patterned_bytes::<KEY_LEN>(4, 9));
-        let state = State(patterned_bytes::<STATE_LEN>(6, 2));
-        let block = Block(patterned_bytes::<BLOCK_LEN>(3, 7));
-
-        let msg = Message::new(&state, &block);
-        let columns = ScalarBackend::transform_columns(&msg);
-
-        for (j, col) in columns.iter().enumerate() {
-            assert_eq!(*col, msg.transform_column(j));
-        }
-
-        let reduced = ScalarBackend::reduce_columns(&key, &columns);
-        let expected = helpers::reduce_columns_reference(&key, &columns);
-        assert_eq!(reduced, expected);
-    }
-
-    #[cfg(feature = "parallel")]
-    #[test]
-    fn parallel_backend_transform_and_reduce_match_reference() {
-        let key = Key(patterned_bytes::<KEY_LEN>(4, 9));
-        let state = State(patterned_bytes::<STATE_LEN>(6, 2));
-        let block = Block(patterned_bytes::<BLOCK_LEN>(3, 7));
-
-        let msg = Message::new(&state, &block);
-        let columns = ParallelBackend::transform_columns(&msg);
-
-        for (j, col) in columns.iter().enumerate() {
-            assert_eq!(*col, msg.transform_column(j));
-        }
-
-        let reduced = ParallelBackend::reduce_columns(&key, &columns);
-        let expected = helpers::reduce_columns_reference(&key, &columns);
-        assert_eq!(reduced, expected);
     }
 
     #[test]
